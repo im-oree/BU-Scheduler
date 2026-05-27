@@ -5,7 +5,10 @@
   "outputDirectory": "dist",
   "routes": [
     {
-      "src": "/(.*)",
+      "handle": "filesystem"
+    },
+    {
+      "src": "/.*",
       "dest": "/index.html"
     }
   ]
