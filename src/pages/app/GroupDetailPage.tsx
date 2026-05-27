@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Plus, UserPlus } from 'lucide-react';
@@ -5,25 +6,58 @@ import { Badge, Button, Card, Input, Tabs } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
 import { formatDateTime } from '../../lib/format';
 import {
-  getAnnouncements,
-  getChatMessages,
-  getGroup,
-  getMembers,
-  scheduleEvents,
-} from '../../data/mockData';
+  fetchGroupAnnouncements,
+  fetchGroupById,
+  fetchGroupChatMessages,
+  fetchGroupMembers,
+  fetchGroupTimetableEntries,
+} from '../../lib/studenthubData';
 
 export function GroupDetailPage() {
   const { groupId } = useParams();
-  const group = getGroup(groupId);
-  const members = getMembers(group.id);
-  const announcements = getAnnouncements(group.id);
+  const groupQuery = useQuery({
+    queryKey: ['group', groupId],
+    queryFn: async () => (groupId ? fetchGroupById(groupId) : null),
+    enabled: Boolean(groupId),
+    staleTime: 60_000,
+  });
+  const membersQuery = useQuery({
+    queryKey: ['group-members', groupId],
+    queryFn: async () => (groupId ? fetchGroupMembers(groupId) : []),
+    enabled: Boolean(groupId),
+    staleTime: 60_000,
+  });
+  const announcementsQuery = useQuery({
+    queryKey: ['group-announcements', groupId],
+    queryFn: async () => (groupId ? fetchGroupAnnouncements(groupId) : []),
+    enabled: Boolean(groupId),
+    staleTime: 30_000,
+  });
+  const chatQuery = useQuery({
+    queryKey: ['group-chat', groupId],
+    queryFn: async () => (groupId ? fetchGroupChatMessages(groupId) : []),
+    enabled: Boolean(groupId),
+    staleTime: 30_000,
+  });
+  const scheduleQuery = useQuery({
+    queryKey: ['group-schedule', groupId],
+    queryFn: async () => (groupId ? fetchGroupTimetableEntries(groupId) : []),
+    enabled: Boolean(groupId),
+    staleTime: 60_000,
+  });
+
+  const group = groupQuery.data;
+  const members = membersQuery.data ?? [];
+  const announcements = announcementsQuery.data ?? [];
+  const chatMessages = chatQuery.data ?? [];
+  const scheduleEvents = scheduleQuery.data ?? [];
   const [tab, setTab] = useState('schedule');
 
   return (
     <PageFrame
       eyebrow="Group detail"
-      title={group.title}
-      description={`${group.courseCode} · Level ${group.level} · ${group.memberCount} members`}
+      title={group?.title ?? 'Group'}
+      description={`${group?.courseCode ?? '—'} · Level ${group?.level ?? '—'} · ${members.length} members`}
       action={
         <Button variant="primary" leadingIcon={<Plus size={18} />}>
           Add class
@@ -67,24 +101,14 @@ export function GroupDetailPage() {
           {scheduleEvents.map((event) => (
             <Card key={event.id} className="timeline-card">
               <div className="timeline-card__left">
-                <Badge
-                  tone={
-                    event.accent === 'green'
-                      ? 'success'
-                      : event.accent === 'amber'
-                        ? 'warning'
-                        : 'info'
-                  }
-                >
-                  {event.subjectCode}
-                </Badge>
-                <h3>{event.title}</h3>
-                <p>{event.groupName}</p>
+                <Badge tone="info">{event.courseCode}</Badge>
+                <h3>{event.courseName}</h3>
+                <p>{event.groupName || event.day}</p>
               </div>
               <div className="timeline-card__right">
-                <span>{formatDateTime(event.startAt)}</span>
-                <span>{event.location}</span>
-                <span>{event.organizer}</span>
+                <span>{formatDateTime(event.startTime)}</span>
+                <span>{event.venue}</span>
+                <span>{event.instructor}</span>
               </div>
             </Card>
           ))}
@@ -135,7 +159,7 @@ export function GroupDetailPage() {
       {tab === 'chat' && (
         <Card className="chat-panel">
           <div className="chat-panel__history">
-            {getChatMessages(group.id).map((message) => (
+            {chatMessages.map((message) => (
               <article key={message.id} className="chat-message">
                 <div className="chat-message__meta">
                   <strong>{message.author}</strong>
@@ -155,7 +179,7 @@ export function GroupDetailPage() {
 
       {tab === 'announcements' && (
         <div className="announcement-list">
-          {announcements.map((announcement) => (
+            {announcements.map((announcement) => (
             <Card key={announcement.id}>
               <strong>{announcement.title}</strong>
               <p className="muted">{announcement.body}</p>

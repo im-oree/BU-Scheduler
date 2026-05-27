@@ -7,11 +7,11 @@ import { normalizeReturnTo } from './lib/auth';
 import { useAuthStore } from './store/useAuthStore';
 import './app.css';
 
-type PageModule = typeof import('./pages/pages');
+type PageModule = typeof import('./pages');
 
 function lazyNamedPage<Name extends keyof PageModule>(name: Name) {
   return lazy(async () => {
-    const module = (await import('./pages/pages')) as PageModule;
+    const module = (await import('./pages')) as PageModule;
     return { default: module[name] as ComponentType };
   });
 }

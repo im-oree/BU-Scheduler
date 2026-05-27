@@ -1,9 +1,19 @@
+import { useQuery } from '@tanstack/react-query';
 import { Bell, Info, XCircle } from 'lucide-react';
 import { Button, Card } from '../../components/ui';
 import { PageFrame, CheckMark, AlertMark } from '../../components/shared';
-import { notifications } from '../../data/mockData';
+import { useAuthStore } from '../../store/useAuthStore';
+import { fetchNotifications } from '../../lib/studenthubData';
 
 export function NotificationsPage() {
+  const userId = useAuthStore((state) => state.session?.user.uid);
+  const notificationsQuery = useQuery({
+    queryKey: ['notifications', userId],
+    queryFn: async () => (userId ? fetchNotifications(userId) : []),
+    enabled: Boolean(userId),
+    staleTime: 30_000,
+  });
+
   return (
     <PageFrame
       eyebrow="Activity"
@@ -19,7 +29,7 @@ export function NotificationsPage() {
       }
     >
       <div className="notification-list">
-        {notifications.map((notification) => (
+        {(notificationsQuery.data ?? []).map((notification) => (
           <Card
             key={notification.id}
             className="notification-list__item"

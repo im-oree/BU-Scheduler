@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, UserPlus } from 'lucide-react';
 import {
@@ -10,7 +11,8 @@ import {
   Tabs,
 } from '../../components/ui';
 import { PageFrame, GroupCardView } from '../../components/shared';
-import { groups } from '../../data/mockData';
+import { useAuthStore } from '../../store/useAuthStore';
+import { fetchUserGroups } from '../../lib/studenthubData';
 
 export function GroupsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -21,17 +23,26 @@ export function GroupsPage() {
     'joined',
   );
   const [searchTerm, setSearchTerm] = useState('');
+  const userId = useAuthStore((state) => state.session?.user.uid);
+
+  const groupsQuery = useQuery({
+    queryKey: ['groups', userId],
+    queryFn: async () => (userId ? fetchUserGroups(userId) : []),
+    enabled: Boolean(userId),
+    staleTime: 60_000,
+  });
 
   const filteredGroups = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    return groups.filter((group) => {
+    const source = groupsQuery.data ?? [];
+    return source.filter((group) => {
       if (!query) return true;
       return (
         group.title.toLowerCase().includes(query) ||
         group.courseCode.toLowerCase().includes(query)
       );
     });
-  }, [searchTerm]);
+  }, [groupsQuery.data, searchTerm]);
 
   return (
     <PageFrame

@@ -18,10 +18,11 @@ import {
   UserCircle
 } from 'lucide-react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { groups as mockGroups } from '../data/mockData';
 import { useEffect, useRef, useCallback } from 'react';
+import { fetchUserGroups } from '../lib/studenthubData';
 
 /* ═══════════════════════════════════════════════════════════════
    NAV CONFIG
@@ -192,12 +193,27 @@ export function AppShell() {
 
   const session = useAuthStore((s) => s.session);
   const signOut = useAuthStore((s) => s.signOut);
+  const userId = session?.user.uid;
+
+  const groupsQuery = useQuery({
+    queryKey: ['sidebar-groups', userId],
+    queryFn: async () => (userId ? fetchUserGroups(userId) : []),
+    enabled: Boolean(userId),
+    staleTime: 60_000,
+  });
 
   const sidebarRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDetailsElement>(null);
 
+  const sidebarGroups = groupsQuery.data ?? [];
   const currentGroup =
-    mockGroups.find((g) => g.id === selectedGroupId) ?? mockGroups[0];
+    sidebarGroups.find((g) => g.id === selectedGroupId) ?? sidebarGroups[0] ?? null;
+
+  useEffect(() => {
+    if (!selectedGroupId && sidebarGroups[0]) {
+      useAppStore.getState().setSelectedGroupId(sidebarGroups[0].id);
+    }
+  }, [selectedGroupId, sidebarGroups]);
 
   const { title: shellTitle, subtitle: shellSubtitle } = resolveShellTitle(
     location.pathname,
@@ -291,13 +307,13 @@ export function AppShell() {
             </div>
 
             <div className="sidebar__group-links">
-              <Link to={`/groups/${currentGroup.id}`} onClick={closeSidebar}>
+              <Link to={currentGroup ? `/groups/${currentGroup.id}` : '/groups'} onClick={closeSidebar}>
                 <Sparkles size={12} /> Overview
               </Link>
-              <Link to={`/groups/${currentGroup.id}/members`} onClick={closeSidebar}>
+              <Link to={currentGroup ? `/groups/${currentGroup.id}/members` : '/groups'} onClick={closeSidebar}>
                 <Users size={12} /> Members
               </Link>
-              <Link to={`/groups/${currentGroup.id}/chat`} onClick={closeSidebar}>
+              <Link to={currentGroup ? `/groups/${currentGroup.id}/chat` : '/groups'} onClick={closeSidebar}>
                 <MessageCircle size={12} /> Chat
               </Link>
             </div>
@@ -308,7 +324,7 @@ export function AppShell() {
         <div className="sidebar__section">
           <p className="sidebar__label">Recent groups</p>
           <div className="sidebar__recent-groups" style={{ display: 'grid', gap: 4 }}>
-            {mockGroups.slice(0, 3).map((group) => (
+            {sidebarGroups.slice(0, 3).map((group) => (
               <NavLink
                 key={group.id}
                 to={`/groups/${group.id}`}
@@ -397,7 +413,7 @@ export function AppShell() {
           <div className="topbar__meta">
             {/* Quick add */}
             <Link
-              to={`/groups/${currentGroup.id}/events/new`}
+              to={currentGroup ? `/groups/${currentGroup.id}/events/new` : '/groups'}
               className="button button--primary button--sm topbar__action"
               style={{ gap: 8 }}
             >

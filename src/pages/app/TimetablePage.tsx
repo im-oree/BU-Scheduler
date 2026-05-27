@@ -1,13 +1,25 @@
+import { useQuery } from '@tanstack/react-query';
 import { CalendarRange } from 'lucide-react';
 import { Badge, Button, Card, Tabs } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
 import { formatDateTime } from '../../lib/format';
-import { scheduleEvents } from '../../data/mockData';
+import { useAuthStore } from '../../store/useAuthStore';
+import { fetchUserTimetableEntries } from '../../lib/studenthubData';
 import { useAppStore } from '../../store/useAppStore';
 
 export function TimetablePage() {
   const scheduleView = useAppStore((state) => state.scheduleView);
   const setScheduleView = useAppStore((state) => state.setScheduleView);
+  const userId = useAuthStore((state) => state.session?.user.uid);
+
+  const timetableQuery = useQuery({
+    queryKey: ['timetable', userId],
+    queryFn: async () => (userId ? fetchUserTimetableEntries(userId) : []),
+    enabled: Boolean(userId),
+    staleTime: 60_000,
+  });
+
+  const scheduleEvents = timetableQuery.data ?? [];
 
   return (
     <PageFrame
@@ -41,23 +53,13 @@ export function TimetablePage() {
             {scheduleEvents.map((event) => (
               <Card key={event.id} className="timeline-card">
                 <div className="timeline-card__left">
-                  <Badge
-                    tone={
-                      event.accent === 'green'
-                        ? 'success'
-                        : event.accent === 'amber'
-                          ? 'warning'
-                          : 'info'
-                    }
-                  >
-                    {event.subjectCode}
-                  </Badge>
-                  <h3>{event.title}</h3>
-                  <p>{event.groupName}</p>
+                  <Badge tone="info">{event.courseCode}</Badge>
+                  <h3>{event.courseName}</h3>
+                  <p>{event.groupName || event.day}</p>
                 </div>
                 <div className="timeline-card__right">
-                  <span>{formatDateTime(event.startAt)}</span>
-                  <span>{event.location}</span>
+                  <span>{formatDateTime(event.startTime)}</span>
+                  <span>{event.venue}</span>
                 </div>
               </Card>
             ))}
@@ -69,7 +71,7 @@ export function TimetablePage() {
                 <Card key={day} className="calendar-grid__day">
                   <strong>{day}</strong>
                   <span>8 AM - 6 PM</span>
-                  <Badge tone="info">2 events</Badge>
+                  <Badge tone="info">{scheduleEvents.length} events</Badge>
                 </Card>
               ),
             )}

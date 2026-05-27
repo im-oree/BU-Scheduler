@@ -1,10 +1,22 @@
+import { useQuery } from '@tanstack/react-query';
 import { Download, Upload } from 'lucide-react';
 import { Button, Card } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
 import { formatDateLabel } from '../../lib/format';
-import { scheduleEvents } from '../../data/mockData';
+import { useAuthStore } from '../../store/useAuthStore';
+import { fetchUserTimetableEntries } from '../../lib/studenthubData';
 
 export function BulkImportPage() {
+  const userId = useAuthStore((state) => state.session?.user.uid);
+  const timetableQuery = useQuery({
+    queryKey: ['timetable', userId],
+    queryFn: async () => (userId ? fetchUserTimetableEntries(userId) : []),
+    enabled: Boolean(userId),
+    staleTime: 60_000,
+  });
+
+  const scheduleEvents = timetableQuery.data ?? [];
+
   return (
     <PageFrame
       eyebrow="Bulk import"

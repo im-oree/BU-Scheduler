@@ -1,18 +1,31 @@
+import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { MessageCircle } from 'lucide-react';
 import { Button, Card, Input } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
-import { getChatMessages, getGroup } from '../../data/mockData';
+import { fetchGroupById, fetchGroupChatMessages } from '../../lib/studenthubData';
 
 export function ChatPage() {
   const { groupId } = useParams();
-  const group = getGroup(groupId);
-  const messages = getChatMessages(group.id);
+  const groupQuery = useQuery({
+    queryKey: ['group', groupId],
+    queryFn: async () => (groupId ? fetchGroupById(groupId) : null),
+    enabled: Boolean(groupId),
+    staleTime: 60_000,
+  });
+  const chatQuery = useQuery({
+    queryKey: ['group-chat', groupId],
+    queryFn: async () => (groupId ? fetchGroupChatMessages(groupId) : []),
+    enabled: Boolean(groupId),
+    staleTime: 30_000,
+  });
+  const group = groupQuery.data;
+  const messages = chatQuery.data ?? [];
 
   return (
     <PageFrame
       eyebrow="Messages"
-      title={`${group.title} chat`}
+      title={`${group?.title ?? 'Group'} chat`}
       description="Member names, timestamps, and message history in a mobile-friendly conversation view."
       action={
         <Button

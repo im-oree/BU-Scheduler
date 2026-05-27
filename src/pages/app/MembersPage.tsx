@@ -1,18 +1,32 @@
+import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { UserPlus } from 'lucide-react';
 import { Badge, Button, Card, Input, Select } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
-import { getGroup, getMembers } from '../../data/mockData';
+import { fetchGroupById, fetchGroupMembers } from '../../lib/studenthubData';
 
 export function MembersPage() {
   const { groupId } = useParams();
-  const group = getGroup(groupId);
-  const members = getMembers(group.id);
+  const groupQuery = useQuery({
+    queryKey: ['group', groupId],
+    queryFn: async () => (groupId ? fetchGroupById(groupId) : null),
+    enabled: Boolean(groupId),
+    staleTime: 60_000,
+  });
+  const membersQuery = useQuery({
+    queryKey: ['group-members', groupId],
+    queryFn: async () => (groupId ? fetchGroupMembers(groupId) : []),
+    enabled: Boolean(groupId),
+    staleTime: 60_000,
+  });
+
+  const group = groupQuery.data;
+  const members = membersQuery.data ?? [];
 
   return (
     <PageFrame
       eyebrow="Members"
-      title={`${group.title} members`}
+      title={`${group?.title ?? 'Group'} members`}
       description="Use the table view for role management, invites, and member search."
       action={
         <Button

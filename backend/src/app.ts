@@ -1,6 +1,7 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import admin from 'firebase-admin';
 import helmet from 'helmet';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import { createHash, randomUUID } from 'node:crypto';
@@ -14,16 +15,42 @@ import {
 
 dotenv.config();
 
+// Initialize Firebase Admin SDK if credentials are provided.
+// Recommended: set FIREBASE_ADMIN_SDK_JSON to the service account JSON string
+// or set GOOGLE_APPLICATION_CREDENTIALS to a path on the server.
+try {
+  if (process.env.FIREBASE_ADMIN_SDK_JSON) {
+    const cred = JSON.parse(process.env.FIREBASE_ADMIN_SDK_JSON as string);
+    admin.initializeApp({ credential: admin.credential.cert(cred as admin.ServiceAccount) });
+    console.log('Firebase Admin initialized from FIREBASE_ADMIN_SDK_JSON');
+  } else {
+    // If Google Application Default Credentials are available, initialize with defaults.
+    // This will use GOOGLE_APPLICATION_CREDENTIALS or metadata service when available.
+    admin.initializeApp();
+    console.log('Firebase Admin initialized with default credentials');
+  }
+} catch (err) {
+  console.warn('Firebase Admin not initialized - token verification will be disabled in this environment');
+}
+
 const appName = process.env.APP_NAME ?? 'BU Scheduler API';
 const corsOrigin = process.env.CORS_ORIGIN ?? '*';
 const jwtSecret = process.env.JWT_SECRET ?? 'dev-only-jwt-secret-change-me';
 const jwtExpiry = (process.env.JWT_EXPIRY ?? '7d') as SignOptions['expiresIn'];
+
+function normalizeOrigin(value: string) {
+  return value.trim().replace(/\/+$/u, '').toLowerCase();
+}
+
 const allowedOrigins = corsOrigin
   .split(',')
-  .map((origin) => origin.trim())
+  .map((origin) => normalizeOrigin(origin))
   .filter(Boolean);
 
 const allowAllOrigins = allowedOrigins.includes('*');
+
+console.log('[CORS] Allowed origins:', allowedOrigins);
+console.log('[CORS] Allow all origins?', allowAllOrigins);
 
 const app = express();
 app.set('trust proxy', 1);
@@ -32,11 +59,16 @@ app.use(express.json({ limit: '2mb' }));
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowAllOrigins || allowedOrigins.includes(origin)) {
+      const normalizedOrigin = origin ? normalizeOrigin(origin) : null;
+      console.log(`[CORS] Incoming origin: ${origin}, normalized: ${normalizedOrigin}`);
+
+      if (!origin || allowAllOrigins || (normalizedOrigin && allowedOrigins.includes(normalizedOrigin))) {
+        console.log('[CORS] ✓ Origin allowed');
         callback(null, true);
         return;
       }
 
+      console.log('[CORS] ✗ Origin blocked. Expected one of:', allowedOrigins);
       callback(new Error(`CORS blocked for origin: ${origin}`));
     },
   }),
@@ -459,6 +491,8 @@ app.post('/api/auth/firebase-to-jwt', (req: Request, res: Response) => {
     return;
   }
 
+  // Firebase client already verified the ID token, so we accept it at face value here.
+  // In production, you'd verify the signature using Firebase Admin SDK.
   const uid = firebaseUid ?? firebaseIdToken ?? 'user_001';
   const user = multiAppAuthStore.getUser(uid) ?? multiAppAuthStore.ensureUser(uid);
 

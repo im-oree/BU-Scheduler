@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
   Button,
@@ -8,10 +9,20 @@ import {
   Textarea,
 } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
-import { profileSummary } from '../../data/mockData';
+import { useAuthStore } from '../../store/useAuthStore';
+import { fetchCurrentUserProfile } from '../../lib/studenthubData';
 
 export function ProfilePage() {
   const [tab, setTab] = useState('profile');
+  const userId = useAuthStore((state) => state.session?.user.uid);
+  const profileQuery = useQuery({
+    queryKey: ['profile', userId],
+    queryFn: async () => (userId ? fetchCurrentUserProfile(userId) : null),
+    enabled: Boolean(userId),
+    staleTime: 60_000,
+  });
+
+  const profile = profileQuery.data;
 
   return (
     <PageFrame
@@ -33,23 +44,23 @@ export function ProfilePage() {
       <Card>
         {tab === 'profile' && (
           <div className="form-grid">
-            <Input label="Name" defaultValue={profileSummary.name} />
+            <Input label="Name" defaultValue={profile?.name ?? ''} />
             <Input
               label="Email"
-              defaultValue={profileSummary.email}
+              defaultValue={profile?.email ?? ''}
               readOnly
             />
-            <Input label="Phone" defaultValue={profileSummary.phone} />
+            <Input label="Phone" defaultValue={profile?.phone ?? ''} />
             <Select
               label="Timezone"
-              defaultValue={profileSummary.timezone}
+              defaultValue={profile?.timezone ?? 'Africa/Lagos'}
             >
               <option value="Africa/Lagos">Africa/Lagos</option>
               <option value="UTC">UTC</option>
             </Select>
             <Textarea
               label="Bio"
-              defaultValue={profileSummary.bio}
+              defaultValue={profile?.bio ?? ''}
               rows={4}
             />
           </div>
@@ -72,7 +83,7 @@ export function ProfilePage() {
           <div className="tool-list">
             <div className="tool-list__item">
               <strong>Linked StudentHub account</strong>
-              <span>{profileSummary.email}</span>
+              <span>{profile?.email ?? ''}</span>
             </div>
             <div className="tool-list__item">
               <strong>Delete account</strong>

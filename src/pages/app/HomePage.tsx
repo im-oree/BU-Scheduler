@@ -3,30 +3,56 @@ import { useQuery } from '@tanstack/react-query';
 import { Bell, CalendarDays, ChevronRight, Grid2x2, Link2 } from 'lucide-react';
 import { Badge, Button, Card } from '../../components/ui';
 import { PageFrame, StatGrid } from '../../components/shared';
-import { fetchGroups, fetchHealth } from '../../lib/api';
+import { quickActions } from '../../data/mockData';
+import { formatDateTime } from '../../lib/format';
+import { useAuthStore } from '../../store/useAuthStore';
 import {
-  announcementsByGroup,
-  groups,
-  quickActions,
-  stats,
-} from '../../data/mockData';
+  fetchNotifications,
+  fetchUserGroups,
+  fetchUserTimetableEntries,
+} from '../../lib/studenthubData';
+
+function formatNextClassLabel(startTime?: string) {
+  if (!startTime) return 'No upcoming class';
+  const date = new Date(startTime);
+  if (Number.isNaN(date.getTime())) return startTime;
+  return date.toLocaleString([], {
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
 
 export function HomePage() {
-  const healthQuery = useQuery({
-    queryKey: ['health'],
-    queryFn: ({ signal }) => fetchHealth(signal),
-    staleTime: 30_000,
-  });
+  const userId = useAuthStore((state) => state.session?.user.uid);
+
   const groupsQuery = useQuery({
-    queryKey: ['groups'],
-    queryFn: ({ signal }) => fetchGroups(signal),
+    queryKey: ['home-groups', userId],
+    queryFn: async () => (userId ? fetchUserGroups(userId) : []),
+    enabled: Boolean(userId),
+    staleTime: 60_000,
+  });
+  const timetableQuery = useQuery({
+    queryKey: ['home-timetable', userId],
+    queryFn: async () => (userId ? fetchUserTimetableEntries(userId) : []),
+    enabled: Boolean(userId),
+    staleTime: 60_000,
+  });
+  const notificationsQuery = useQuery({
+    queryKey: ['home-notifications', userId],
+    queryFn: async () => (userId ? fetchNotifications(userId) : []),
+    enabled: Boolean(userId),
     staleTime: 30_000,
   });
 
-  const activeGroups =
-    groupsQuery.data && groupsQuery.data.length > 0
-      ? groupsQuery.data
-      : groups;
+  const activeGroups = groupsQuery.data ?? [];
+  const nextClass = timetableQuery.data?.[0];
+  const stats = [
+    { label: 'Up next', value: formatNextClassLabel(nextClass?.startTime) },
+    { label: 'Groups', value: `${activeGroups.length} active` },
+    { label: 'Unread messages', value: `${notificationsQuery.data?.length ?? 0}` },
+    { label: 'Reminders queued', value: `${timetableQuery.data?.length ?? 0}` },
+  ];
 
   return (
     <PageFrame
@@ -46,9 +72,11 @@ export function HomePage() {
         <Card className="hero-card">
           <div>
             <p className="eyebrow eyebrow--subtle">Your next class</p>
-            <h2>Problem Solving Tutorial</h2>
+            <h2>{nextClass?.courseName ?? 'No upcoming class'}</h2>
             <p className="muted">
-              Today 10:00 AM - 11:00 AM · Room 2 · CS 100 Level - Group B
+              {nextClass
+                ? `${formatDateTime(nextClass.startTime)} · ${formatDateTime(nextClass.endTime)} · ${nextClass.venue} · ${nextClass.groupName || nextClass.courseCode}`
+                : 'Firestore timetable entries will appear here once available.'}
             </p>
           </div>
           <div className="hero-card__actions">
@@ -60,11 +88,8 @@ export function HomePage() {
             </Button>
           </div>
           <div className="hero-card__status">
-            <Badge tone="success">On track</Badge>
-            <span>
-              {healthQuery.data?.service ?? 'API'}{' '}
-              {healthQuery.data?.ok ? 'online' : 'offline'}
-            </span>
+            <Badge tone="success">Connected</Badge>
+            <span>{activeGroups.length} live groups</span>
           </div>
         </Card>
 
@@ -135,18 +160,18 @@ export function HomePage() {
         <Card>
           <div className="section-block__head">
             <div>
-              <p className="eyebrow eyebrow--subtle">Announcements</p>
-              <h2>Recent course-rep updates</h2>
+              <p className="eyebrow eyebrow--subtle">Notifications</p>
+              <h2>Recent updates from Firestore</h2>
             </div>
           </div>
           <div className="announcement-list">
-            {announcementsByGroup.grp_100.map((item) => (
+            {(notificationsQuery.data ?? []).slice(0, 3).map((item) => (
               <article key={item.id} className="announcement-list__item">
                 <div>
                   <strong>{item.title}</strong>
-                  <p>{item.body}</p>
+                  <p>{item.detail}</p>
                 </div>
-                <span className="muted">{item.date}</span>
+                <span className="muted">{item.time}</span>
               </article>
             ))}
           </div>

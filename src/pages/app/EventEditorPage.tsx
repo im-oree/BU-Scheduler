@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
@@ -8,16 +9,22 @@ import {
   Textarea,
 } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
-import { getGroup } from '../../data/mockData';
+import { fetchGroupById } from '../../lib/studenthubData';
 
 export function EventEditorPage() {
   const { groupId, eventId } = useParams();
-  const group = getGroup(groupId);
+  const groupQuery = useQuery({
+    queryKey: ['group', groupId],
+    queryFn: async () => (groupId ? fetchGroupById(groupId) : null),
+    enabled: Boolean(groupId),
+    staleTime: 60_000,
+  });
+  const group = groupQuery.data;
 
   return (
     <PageFrame
       eyebrow="Event editor"
-      title={eventId ? 'Edit event' : `Add class for ${group.title}`}
+      title={eventId ? 'Edit event' : `Add class for ${group?.title ?? 'Group'}`}
       description="Use validated fields for start and end time, recurrence, visibility, and attachments."
       action={
         <Button variant="primary" leadingIcon={<Plus size={18} />}>

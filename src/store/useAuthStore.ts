@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import {
   clearStoredSession,
-  exchangeOAuthCallback,
-  loadStoredSession,
-  logoutStudentHubSession,
-  saveStoredSession,
-  verifyStoredSession,
   type AuthSession,
 } from '../lib/auth';
+import {
+  getFirebaseAuth,
+  onFirebaseAuthStateChanged,
+  signOutFirebase,
+} from '../lib/firebase';
 
 export type AuthStatus = 'loading' | 'anonymous' | 'authenticated';
 
@@ -16,7 +16,6 @@ type AuthState = {
   session: AuthSession | null;
   error: string | null;
   bootstrap: () => Promise<void>;
-  completeStudentHubCallback: (code: string, state: string) => Promise<AuthSession>;
   signOut: () => Promise<void>;
 };
 
@@ -29,45 +28,42 @@ export const useAuthStore = create<AuthState>((set) => ({
   session: null,
   error: null,
   async bootstrap() {
-    const cachedSession = loadStoredSession();
-    if (!cachedSession?.token) {
-      set({ status: 'anonymous', session: null, error: null });
-      return;
-    }
+    const auth = getFirebaseAuth();
 
-    try {
-      const verified = await verifyStoredSession(cachedSession.token);
-      const session = {
-        ...cachedSession,
-        user: verified.user,
-        authorizedApps: verified.authorizedApps ?? cachedSession.authorizedApps,
-      } satisfies AuthSession;
-      saveStoredSession(session);
-      set({ status: 'authenticated', session, error: null });
-    } catch {
-      clearStoredSession();
-      set({ status: 'anonymous', session: null, error: null });
-    }
-  },
-  async completeStudentHubCallback(code: string, state: string) {
-    set({ status: 'loading', error: null });
+    onFirebaseAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        clearStoredSession();
+        set({ status: 'anonymous', session: null, error: null });
+        return;
+      }
 
-    try {
-      const session = await exchangeOAuthCallback(code, state);
-      set({ status: 'authenticated', session, error: null });
-      return session;
-    } catch (error) {
-      const message = extractError(error);
-      set({ status: 'anonymous', session: null, error: message });
-      throw error;
-    }
+      try {
+        const idToken = await user.getIdToken();
+        const session: AuthSession = {
+          token: idToken,
+          idToken,
+          user: {
+            uid: user.uid,
+            email: user.email ?? '',
+            displayName: user.displayName ?? user.email ?? 'StudentHub user',
+            photoURL: user.photoURL ?? undefined,
+          },
+          provider: 'studenthub',
+          returnTo: '/home',
+          scopes: ['openid', 'profile', 'email'],
+        };
+
+        window.localStorage.setItem('bu-scheduler.session', JSON.stringify(session));
+        set({ status: 'authenticated', session, error: null });
+      } catch (error) {
+        const message = extractError(error);
+        clearStoredSession();
+        set({ status: 'anonymous', session: null, error: message });
+      }
+    });
   },
   async signOut() {
-    const cachedSession = loadStoredSession();
-    if (cachedSession?.token) {
-      await logoutStudentHubSession(cachedSession.token);
-    }
-
+    await signOutFirebase();
     clearStoredSession();
     set({ status: 'anonymous', session: null, error: null });
   },

@@ -2,10 +2,10 @@ import { Link } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import { Badge, Card } from '../ui';
 import { AvatarStack } from './AvatarStack';
-import type { groups } from '../../data/mockData';
+import type { StudentHubGroup } from '../../lib/studenthubData';
 
 interface GroupCardViewProps {
-  group: (typeof groups)[number];
+  group: StudentHubGroup;
 }
 
 export function GroupCardView({ group }: GroupCardViewProps) {
