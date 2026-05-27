@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import {
   clearStoredSession,
-  exchangeStudentHubAuthCode,
+  exchangeOAuthCallback,
   loadStoredSession,
+  logoutStudentHubSession,
   saveStoredSession,
-  signInWithPassword,
   verifyStoredSession,
   type AuthSession,
 } from '../lib/auth';
@@ -16,9 +16,8 @@ type AuthState = {
   session: AuthSession | null;
   error: string | null;
   bootstrap: () => Promise<void>;
-  signIn: (email: string, password: string) => Promise<AuthSession>;
   completeStudentHubCallback: (code: string, state: string) => Promise<AuthSession>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
 };
 
 function extractError(error: unknown) {
@@ -41,6 +40,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const session = {
         ...cachedSession,
         user: verified.user,
+        authorizedApps: verified.authorizedApps ?? cachedSession.authorizedApps,
       } satisfies AuthSession;
       saveStoredSession(session);
       set({ status: 'authenticated', session, error: null });
@@ -49,24 +49,11 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ status: 'anonymous', session: null, error: null });
     }
   },
-  async signIn(email: string, password: string) {
-    set({ status: 'loading', error: null });
-
-    try {
-      const session = await signInWithPassword(email, password);
-      set({ status: 'authenticated', session, error: null });
-      return session;
-    } catch (error) {
-      const message = extractError(error);
-      set({ status: 'anonymous', session: null, error: message });
-      throw error;
-    }
-  },
   async completeStudentHubCallback(code: string, state: string) {
     set({ status: 'loading', error: null });
 
     try {
-      const session = await exchangeStudentHubAuthCode(code, state);
+      const session = await exchangeOAuthCallback(code, state);
       set({ status: 'authenticated', session, error: null });
       return session;
     } catch (error) {
@@ -75,7 +62,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       throw error;
     }
   },
-  signOut() {
+  async signOut() {
+    const cachedSession = loadStoredSession();
+    if (cachedSession?.token) {
+      await logoutStudentHubSession(cachedSession.token);
+    }
+
     clearStoredSession();
     set({ status: 'anonymous', session: null, error: null });
   },

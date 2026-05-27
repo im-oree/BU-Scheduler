@@ -14,6 +14,8 @@ Frontend: root of the repository. Backend: `/backend`.
 Frontend:
 
 - `VITE_API_BASE_URL` - Render API base URL, usually `https://your-service.onrender.com/api`
+- `VITE_STUDENTHUB_API` - Hosted StudentHub backend base URL, for example `https://studenthub-backend-1w1n.onrender.com`
+- `VITE_OAUTH_CLIENT_ID` - StudentHub OAuth client id used by the login redirect
 
 Backend:
 
@@ -28,7 +30,7 @@ Backend:
 
 ## Notes
 
-The backend implements a complete **StudentHub-linked authentication system** with canonical identity mapping. This ensures a single user account even when logging in from multiple apps.
+The frontend now uses the hosted StudentHub backend for OIDC login and shared data loading. The backend implements a complete **StudentHub-linked authentication system** with canonical identity mapping. This ensures a single user account even when logging in from multiple apps.
 
 **Key auth features:**
 - PKCE-based OAuth2 code exchange with StudentHub

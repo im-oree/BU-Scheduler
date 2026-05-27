@@ -40,7 +40,7 @@ import {
   Textarea,
 } from '../components/ui';
 import {
-  authorizeStudentHubPopup,
+  buildStudentHubAuthorizeUrl,
   buildStudentHubAuthUrl,
   clearStudentHubAuthRequest,
   getStudentHubAuthRequest,
@@ -164,11 +164,6 @@ export function LoginPage() {
   const authStatus = useAuthStore((state) => state.status);
   const authSession = useAuthStore((state) => state.session);
   const authError = useAuthStore((state) => state.error);
-  const signIn = useAuthStore((state) => state.signIn);
-  const [email, setEmail] = useState('student@university.edu');
-  const [password, setPassword] = useState('password123');
-  const [submitting, setSubmitting] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
 
   const returnTo = normalizeReturnTo(searchParams.get('returnTo') ?? authSession?.returnTo ?? '/home');
 
@@ -178,39 +173,17 @@ export function LoginPage() {
     }
   }, [authStatus, navigate, returnTo]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLocalError(null);
-    setSubmitting(true);
-
-    try {
-      await signIn(email.trim(), password);
-      navigate(returnTo, { replace: true });
-    } catch (error) {
-      setLocalError(error instanceof Error ? error.message : 'Unable to sign in');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleStudentHubSignup() {
-    setLocalError(null);
-
+  async function beginStudentHubAuth(flow: 'login' | 'signup') {
     try {
       const request = await prepareStudentHubAuthRequest({
-        flow: 'signup',
-        email: email.trim() || 'student@university.edu',
-        displayName: email.includes('@') ? email.split('@')[0] : 'Student Hub User',
+        flow,
         returnTo,
       });
-      const popupUrl = buildStudentHubAuthUrl(request);
-      const popup = window.open(popupUrl, 'studenthub-signup', 'width=560,height=760');
-
-      if (!popup) {
-        navigate(popupUrl, { replace: false });
-      }
+      navigate(buildStudentHubAuthUrl(request), { replace: false });
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : 'Unable to start StudentHub sign-up');
+      if (error instanceof Error) {
+        window.alert(error.message);
+      }
     }
   }
 
@@ -233,30 +206,26 @@ export function LoginPage() {
             <h1>Sign in</h1>
           </div>
         </div>
-        <p className="muted">Sign in to manage your timetable and groups.</p>
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <Input label="Email or username" type="text" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} />
-          <Input label="Password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
-          <div className="stack stack--small">
-            <Button variant="primary" size="lg" className="button--full-width" type="submit" disabled={submitting} leadingIcon={<ArrowRight size={18} />}>
-              {submitting ? 'Signing in…' : 'Sign in'}
-            </Button>
-            <Button variant="secondary" size="lg" className="button--full-width" type="button" onClick={handleStudentHubSignup} leadingIcon={<Sparkles size={18} />}>
-              Create account with StudentHub
-            </Button>
-          </div>
-        </form>
+        <p className="muted">Sign in with your real StudentHub account to load live timetable and app data.</p>
+        <div className="stack stack--small">
+          <Button variant="primary" size="lg" className="button--full-width" type="button" onClick={() => beginStudentHubAuth('login')} leadingIcon={<ArrowRight size={18} />}>
+            Sign in with StudentHub
+          </Button>
+          <Button variant="secondary" size="lg" className="button--full-width" type="button" onClick={() => beginStudentHubAuth('signup')} leadingIcon={<Sparkles size={18} />}>
+            Create StudentHub account
+          </Button>
+        </div>
         <div className="auth-card__list">
           <div>
-            <strong>Your StudentHub identity powers BU Scheduler</strong>
-            <span>Use the same account across devices without creating a separate profile.</span>
+            <strong>Real provider login</strong>
+            <span>You are redirected to the hosted StudentHub OAuth flow.</span>
           </div>
           <div>
-            <strong>Protected session</strong>
-            <span>No access tokens are placed in the URL.</span>
+            <strong>Shared identity</strong>
+            <span>The backend links your StudentHub subject to one canonical account.</span>
           </div>
         </div>
-        {(localError || authError) ? <p className="form-error">{localError ?? authError}</p> : null}
+        {authError ? <p className="form-error">{authError}</p> : null}
       </Card>
     </div>
   );
@@ -350,43 +319,13 @@ export function StudentHubAuthPage() {
   const flow = searchParams.get('flow') === 'login' ? 'login' : 'signup';
   const returnTo = normalizeReturnTo(searchParams.get('returnTo'));
   const pendingRequest = state ? getStudentHubAuthRequest(state) : null;
-  const [email, setEmail] = useState(pendingRequest?.email ?? 'student@university.edu');
-  const [password, setPassword] = useState('password123');
-  const [displayName, setDisplayName] = useState(pendingRequest?.displayName ?? 'Student Hub User');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (pendingRequest) {
-      setEmail(pendingRequest.email);
-      setDisplayName(pendingRequest.displayName);
-    }
-  }, [pendingRequest]);
-
-  async function handleContinue(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoading(true);
-    setError(null);
-
-    if (!state || !pendingRequest) {
-      setError('This StudentHub sign-in session expired. Return to BU Scheduler and try again.');
-      setLoading(false);
+    if (!pendingRequest) {
       return;
     }
-
-    try {
-      const authorizeResponse = await authorizeStudentHubPopup({
-        ...pendingRequest,
-        email: email.trim(),
-        displayName: displayName.trim() || email.trim().split('@')[0] || 'Student Hub User',
-      });
-
-      window.location.assign(`/auth/callback?code=${encodeURIComponent(authorizeResponse.code)}&state=${encodeURIComponent(authorizeResponse.state)}`);
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : 'Unable to continue with StudentHub');
-      setLoading(false);
-    }
-  }
+    window.location.replace(buildStudentHubAuthorizeUrl(pendingRequest));
+  }, [pendingRequest]);
 
   if (!state) {
     return (
@@ -408,44 +347,14 @@ export function StudentHubAuthPage() {
       <Card className="auth-card auth-card--login auth-card--popup">
         <p className="eyebrow eyebrow--subtle">StudentHub official auth</p>
         <h1>{flow === 'signup' ? 'Create your StudentHub account' : 'Sign in to StudentHub'}</h1>
-        <p className="muted">Complete this step, then you will be returned to BU Scheduler already authenticated.</p>
-        <form className="auth-form" onSubmit={handleContinue}>
-          <Input label="StudentHub email or username" type="text" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} />
-          <Input label="Password" type="password" autoComplete={flow === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} />
-          <Input label="Display name" type="text" autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-          <Button variant="primary" size="lg" className="button--full-width" type="submit" disabled={loading} leadingIcon={<ArrowRight size={18} />}>
-            {loading ? 'Continuing…' : 'Continue to BU Scheduler'}
-          </Button>
-        </form>
-        <p className="form-note">Return to BU Scheduler after StudentHub verifies your identity.</p>
-        {error ? <p className="form-error">{error}</p> : null}
+        <p className="muted">Redirecting you to the hosted StudentHub login now.</p>
+        <div className="spinner" aria-hidden="true" />
+        <p className="form-note">If redirect does not start automatically, go back and try again.</p>
       </Card>
       <div className="auth-popup__footer">
         <span>Callback will return to</span>
         <strong>{returnTo}</strong>
       </div>
-    </div>
-  );
-  return (
-    <div className="auth-layout auth-layout--centered">
-      <Card className="auth-card auth-card--login">
-        <p className="eyebrow eyebrow--subtle">Authentication</p>
-        <h1>Sign in to BU Scheduler</h1>
-        <p className="muted">The demo shell routes into StudentHub-style sign in and then lands on the app routes.</p>
-        <Button variant="primary" size="lg" className="button--full-width" leadingIcon={<ArrowRight size={18} />}>
-          Sign in with StudentHub
-        </Button>
-        <div className="auth-card__list">
-          <div>
-            <strong>Single sign-on</strong>
-            <span>Keep StudentHub as the canonical identity source.</span>
-          </div>
-          <div>
-            <strong>Fast redirect</strong>
-            <span>Return to /home or /groups after successful login.</span>
-          </div>
-        </div>
-      </Card>
     </div>
   );
 }
@@ -1137,8 +1046,8 @@ export function NotFoundPage() {
     <div className="auth-layout auth-layout--centered">
       <Card className="auth-card auth-card--login">
         <p className="eyebrow eyebrow--subtle">404</p>
-        <h1>Group not found</h1>
-        <p className="muted">This group may have been deleted or you may not have access.</p>
+        <h1>Page not found</h1>
+        <p className="muted">That route does not exist in this build.</p>
         <div className="stack stack--large">
           <Button variant="primary" size="lg">Go home</Button>
           <Button variant="ghost" size="lg">Browse groups</Button>

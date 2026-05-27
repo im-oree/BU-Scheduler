@@ -13,7 +13,13 @@ export type GroupSummary = {
   nextClass: string;
 };
 
-export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/u, '');
+}
+
+const studentHubBaseUrl = trimTrailingSlash(import.meta.env.VITE_STUDENTHUB_API || import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000');
+
+export const apiBaseUrl = `${studentHubBaseUrl}/api`;
 
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {

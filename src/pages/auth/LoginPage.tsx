@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import { Button, Card, Input } from '../../components/ui';
 import {
+  buildStudentHubAuthorizeUrl,
   buildStudentHubAuthUrl,
   normalizeReturnTo,
   prepareStudentHubAuthRequest,
@@ -16,12 +16,6 @@ export function LoginPage() {
   const authStatus = useAuthStore((state) => state.status);
   const authSession = useAuthStore((state) => state.session);
   const authError = useAuthStore((state) => state.error);
-  const signIn = useAuthStore((state) => state.signIn);
-
-  const [email, setEmail] = useState('student@university.edu');
-  const [password, setPassword] = useState('password123');
-  const [submitting, setSubmitting] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
 
   const returnTo = normalizeReturnTo(
     searchParams.get('returnTo') ?? authSession?.returnTo ?? '/home',
@@ -33,51 +27,17 @@ export function LoginPage() {
     }
   }, [authStatus, navigate, returnTo]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLocalError(null);
-    setSubmitting(true);
-
-    try {
-      await signIn(email.trim(), password);
-      navigate(returnTo, { replace: true });
-    } catch (error) {
-      setLocalError(
-        error instanceof Error ? error.message : 'Unable to sign in',
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleStudentHubSignup() {
-    setLocalError(null);
-
+  async function beginStudentHubAuth(flow: 'login' | 'signup') {
     try {
       const request = await prepareStudentHubAuthRequest({
-        flow: 'signup',
-        email: email.trim() || 'student@university.edu',
-        displayName: email.includes('@')
-          ? email.split('@')[0]
-          : 'Student Hub User',
+        flow,
         returnTo,
       });
-      const popupUrl = buildStudentHubAuthUrl(request);
-      const popup = window.open(
-        popupUrl,
-        'studenthub-signup',
-        'width=560,height=760',
-      );
-
-      if (!popup) {
-        navigate(popupUrl, { replace: false });
-      }
+      navigate(buildStudentHubAuthUrl(request), { replace: false });
     } catch (error) {
-      setLocalError(
-        error instanceof Error
-          ? error.message
-          : 'Unable to start StudentHub sign-up',
-      );
+      if (error instanceof Error) {
+        window.alert(error.message);
+      }
     }
   }
 
@@ -104,64 +64,28 @@ export function LoginPage() {
             <h1>Sign in</h1>
           </div>
         </div>
-        <p className="muted">Sign in to manage your timetable and groups.</p>
-
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <Input
-            label="Email or username"
-            type="text"
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <Input
-            label="Password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <div className="stack stack--small">
-            <Button
-              variant="primary"
-              size="lg"
-              className="button--full-width"
-              type="submit"
-              disabled={submitting}
-              leadingIcon={<ArrowRight size={18} />}
-            >
-              {submitting ? 'Signing in…' : 'Sign in'}
-            </Button>
-            <Button
-              variant="secondary"
-              size="lg"
-              className="button--full-width"
-              type="button"
-              onClick={handleStudentHubSignup}
-              leadingIcon={<Sparkles size={18} />}
-            >
-              Create account with StudentHub
-            </Button>
-          </div>
-        </form>
+        <p className="muted">Sign in with your real StudentHub account to load live timetable and app data.</p>
+        <div className="stack stack--small">
+          <Button variant="primary" size="lg" className="button--full-width" type="button" onClick={() => beginStudentHubAuth('login')} leadingIcon={<ArrowRight size={18} />}>
+            Sign in with StudentHub
+          </Button>
+          <Button variant="secondary" size="lg" className="button--full-width" type="button" onClick={() => beginStudentHubAuth('signup')} leadingIcon={<Sparkles size={18} />}>
+            Create StudentHub account
+          </Button>
+        </div>
 
         <div className="auth-card__list">
           <div>
-            <strong>Your StudentHub identity powers BU Scheduler</strong>
-            <span>
-              Use the same account across devices without creating a separate
-              profile.
-            </span>
+            <strong>Real provider login</strong>
+            <span>You are redirected to the hosted StudentHub OAuth flow.</span>
           </div>
           <div>
-            <strong>Protected session</strong>
-            <span>No access tokens are placed in the URL.</span>
+            <strong>Shared identity</strong>
+            <span>The backend links your StudentHub subject to one canonical account.</span>
           </div>
         </div>
 
-        {localError || authError ? (
-          <p className="form-error">{localError ?? authError}</p>
-        ) : null}
+        {authError ? <p className="form-error">{authError}</p> : null}
       </Card>
     </div>
   );

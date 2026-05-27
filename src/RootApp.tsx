@@ -101,6 +101,24 @@ function PublicLandingRedirect() {
   return <Navigate to="/login" replace />;
 }
 
+function LegacyFirebaseLoginRedirect() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const redirectTo = params.get('redirect_to') ?? params.get('redirectTo');
+
+    if (redirectTo) {
+      window.location.replace(redirectTo);
+      return;
+    }
+
+    window.location.replace('/login');
+  }, [location.search]);
+
+  return <LoadingScreen />;
+}
+
 export default function RootApp() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -111,6 +129,7 @@ export default function RootApp() {
             <Route path="/" element={<PublicLandingRedirect />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/auth/login" element={<LoginPage />} />
+            <Route path="/auth/firebase-login" element={<LegacyFirebaseLoginRedirect />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
             <Route path="/auth/studenthub" element={<StudentHubAuthPage />} />
             <Route path="/invite/:inviteCode" element={<InvitePage />} />
