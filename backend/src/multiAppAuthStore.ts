@@ -3,6 +3,32 @@ import { randomUUID } from 'node:crypto';
 export type AppPermission = 'profile' | 'events' | 'schedule' | 'transactions' | 'notifications' | 'wallet';
 export type PermissionScope = 'read' | 'write' | 'delete';
 
+export type AuditLogType = 
+  | 'account_created'
+  | 'account_linked'
+  | 'studenthub_login'
+  | 'local_login'
+  | 'logout'
+  | 'token_issued'
+  | 'token_refreshed'
+  | 'token_revoked'
+  | 'app_authorized'
+  | 'app_revoked'
+  | 'data_accessed'
+  | 'identity_unlinked';
+
+export type AuditLog = {
+  id: string;
+  userId: string;
+  action: AuditLogType;
+  details: Record<string, unknown>;
+  appId?: string;
+  timestamp: string;
+  ipAddress?: string;
+  userAgent?: string;
+  status: 'success' | 'failure';
+};
+
 export type UserAppAuthorization = {
   appId: string;
   appName: string;
@@ -30,6 +56,11 @@ export type UserRecord = {
       notifications: boolean;
     };
   };
+  // StudentHub identity linking
+  studenthubId?: string;
+  identityProvider?: 'local' | 'studenthub';
+  linkedAt?: string;
+  authVersion: number;
 };
 
 export type RegisteredApp = {
@@ -106,10 +137,17 @@ export type AuthTokenPayload = {
   displayName: string;
   sourceApp: string;
   authorizedApps: UserAppAuthorization[];
+  jti: string; // JWT ID for revocation tracking
+  iat: number; // Issued at timestamp
 };
 
 const now = () => new Date().toISOString();
 const token = (prefix: string) => `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+
+// Persistent storage structures
+const studenthubIdMap = new Map<string, string>(); // Maps studenthubId -> uid
+const revokedTokens = new Set<string>(); // Track revoked token JTIs
+const auditLogs: AuditLog[] = [];
 
 const demoSharedData: Record<string, SharedDataPayload> = {
   user_001: {
@@ -198,6 +236,7 @@ const users = new Map<string, UserRecord>([
           notifications: true,
         },
       },
+      authVersion: 1,
     },
   ],
 ]);
@@ -268,6 +307,7 @@ function ensureUser(uid: string) {
         notifications: true,
       },
     },
+    authVersion: 1,
   };
 
   users.set(uid, created);
@@ -285,6 +325,8 @@ function buildTokenPayload(user: UserRecord, sourceApp: string): AuthTokenPayloa
     displayName: user.displayName,
     sourceApp,
     authorizedApps: user.authorizedApps,
+    jti: token('jti'),
+    iat: Math.floor(Date.now() / 1000),
   };
 }
 
@@ -379,6 +421,9 @@ export const multiAppAuthStore = {
   accessLogs,
   dataSnapshots,
   shareTokens,
+  auditLogs,
+  studenthubIdMap,
+  revokedTokens,
   ensureUser,
   isKnownDataType,
   buildTokenPayload,
@@ -387,6 +432,55 @@ export const multiAppAuthStore = {
   userHasPermission,
   getSharedData,
   logAccess,
+  // New audit logging methods
+  addAuditLog(userId: string, action: AuditLogType, details: Record<string, unknown>, appId?: string, status: 'success' | 'failure' = 'success') {
+    const log: AuditLog = {
+      id: token('audit'),
+      userId,
+      action,
+      details,
+      appId,
+      timestamp: now(),
+      status,
+    };
+    auditLogs.unshift(log);
+    return log;
+  },
+  getAuditLogs(userId?: string, limit = 100) {
+    let results = auditLogs;
+    if (userId) {
+      results = results.filter((log) => log.userId === userId);
+    }
+    return results.slice(0, limit);
+  },
+  // StudentHub identity linking
+  linkStudentHubIdentity(userId: string, studenthubId: string) {
+    const user = users.get(userId);
+    if (!user) {
+      return null;
+    }
+    // Remove old mapping if exists
+    if (user.studenthubId && studenthubIdMap.has(user.studenthubId)) {
+      studenthubIdMap.delete(user.studenthubId);
+    }
+    // Add new mapping
+    user.studenthubId = studenthubId;
+    user.identityProvider = 'studenthub';
+    user.linkedAt = now();
+    studenthubIdMap.set(studenthubId, userId);
+    return user;
+  },
+  getUserByStudentHubId(studenthubId: string) {
+    const uid = studenthubIdMap.get(studenthubId);
+    return uid ? users.get(uid) ?? null : null;
+  },
+  // Token revocation
+  revokeToken(jti: string) {
+    revokedTokens.add(jti);
+  },
+  isTokenRevoked(jti: string) {
+    return revokedTokens.has(jti);
+  },
   createUser(email: string, password: string, displayName: string) {
     const uid = token('uid');
     const user: UserRecord = {
@@ -411,6 +505,7 @@ export const multiAppAuthStore = {
           notifications: true,
         },
       },
+      authVersion: 1,
     };
 
     users.set(uid, user);

@@ -28,7 +28,18 @@ Backend:
 
 ## Notes
 
-The backend currently ships with a deployable scaffold, sample routes, and in-memory demo data so the frontend can boot cleanly before the StudentHub integration is connected.
+The backend implements a complete **StudentHub-linked authentication system** with canonical identity mapping. This ensures a single user account even when logging in from multiple apps.
+
+**Key auth features:**
+- PKCE-based OAuth2 code exchange with StudentHub
+- Canonical user identity (prevents duplicate accounts across apps)
+- Token revocation and logout functionality
+- Complete audit logging of all auth events
+- Multi-app permission grants
+
+See [docs/BACKEND_AUTH_SUMMARY.md](docs/BACKEND_AUTH_SUMMARY.md) for implementation overview and [docs/backend-auth-implementation.md](docs/backend-auth-implementation.md) for detailed technical documentation.
+
+The backend ships with a deployable scaffold, sample routes, and in-memory demo data so the frontend can boot cleanly. To integrate with a live StudentHub backend, see the auth documentation for StudentHub ID linking configuration.
 
 ## Frontend shell
 

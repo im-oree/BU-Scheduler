@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowRight,
@@ -26,7 +27,6 @@ import {
   Users,
   XCircle,
 } from 'lucide-react';
-import { AppShell } from '../components/Layout';
 import {
   Badge,
   Button,
@@ -39,6 +39,14 @@ import {
   Tabs,
   Textarea,
 } from '../components/ui';
+import {
+  authorizeStudentHubPopup,
+  buildStudentHubAuthUrl,
+  clearStudentHubAuthRequest,
+  getStudentHubAuthRequest,
+  normalizeReturnTo,
+  prepareStudentHubAuthRequest,
+} from '../lib/auth';
 import { fetchGroups, fetchHealth, type GroupSummary } from '../lib/api';
 import { formatDateLabel, formatDateTime, formatRelativeLabel } from '../lib/format';
 import {
@@ -59,6 +67,7 @@ import {
   stats,
 } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import { useAuthStore } from '../store/useAuthStore';
 
 function PageFrame({
   eyebrow,
@@ -146,56 +155,277 @@ function ToneBadge({ tone }: { tone: 'success' | 'warning' | 'danger' | 'info' }
 }
 
 export function SplashPage() {
-  return (
-    <div className="auth-layout auth-layout--split">
-      <section className="hero-panel">
-        <p className="eyebrow">BU Scheduler</p>
-        <h1>Manage your timetable and groups from one mobile-first workspace.</h1>
-        <p className="hero-panel__lead">
-          StudentHub-linked scheduling, rep workflows, reminders, and group chat designed for quick actions and clear hierarchy.
-        </p>
-        <div className="hero-panel__actions">
-          <Link to="/auth/login" className="button button--primary button--lg">
-          <Sparkles size={18} />
-          <span>Sign in with StudentHub</span>
-        </Link>
-        <Button variant="ghost" size="lg" leadingIcon={<Info size={18} />}>
-          Learn more
-        </Button>
-        </div>
-        <div className="feature-list">
-          {productFeatures.map((feature) => (
-            <Card key={feature.title} className="feature-list__item">
-              <strong>{feature.title}</strong>
-              <p>{feature.description}</p>
-            </Card>
-          ))}
-        </div>
-      </section>
+  return <Navigate to="/login" replace />;
+}
 
-      <Card className="auth-card">
-        <p className="eyebrow eyebrow--subtle">Entry point</p>
-        <h2>Sign in with StudentHub</h2>
-        <p className="muted">Unauthenticated users start here before jumping into the app shell.</p>
-        <div className="stack stack--large">
-          <Button variant="primary" size="lg" className="button--full-width" leadingIcon={<ArrowRight size={18} />}>
-            Go to login
-          </Button>
-          <Button variant="secondary" size="lg" className="button--full-width" leadingIcon={<Grid2x2 size={18} />}>
-            Browse feature map
-          </Button>
+export function LoginPage() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const authStatus = useAuthStore((state) => state.status);
+  const authSession = useAuthStore((state) => state.session);
+  const authError = useAuthStore((state) => state.error);
+  const signIn = useAuthStore((state) => state.signIn);
+  const [email, setEmail] = useState('student@university.edu');
+  const [password, setPassword] = useState('password123');
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const returnTo = normalizeReturnTo(searchParams.get('returnTo') ?? authSession?.returnTo ?? '/home');
+
+  useEffect(() => {
+    if (authStatus === 'authenticated') {
+      navigate(returnTo, { replace: true });
+    }
+  }, [authStatus, navigate, returnTo]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLocalError(null);
+    setSubmitting(true);
+
+    try {
+      await signIn(email.trim(), password);
+      navigate(returnTo, { replace: true });
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'Unable to sign in');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleStudentHubSignup() {
+    setLocalError(null);
+
+    try {
+      const request = await prepareStudentHubAuthRequest({
+        flow: 'signup',
+        email: email.trim() || 'student@university.edu',
+        displayName: email.includes('@') ? email.split('@')[0] : 'Student Hub User',
+        returnTo,
+      });
+      const popupUrl = buildStudentHubAuthUrl(request);
+      const popup = window.open(popupUrl, 'studenthub-signup', 'width=560,height=760');
+
+      if (!popup) {
+        navigate(popupUrl, { replace: false });
+      }
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'Unable to start StudentHub sign-up');
+    }
+  }
+
+  if (authStatus === 'loading') {
+    return (
+      <div className="loading-screen" aria-live="polite" aria-busy="true">
+        <div className="spinner" />
+        <p>Checking your session…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="auth-layout auth-layout--centered auth-layout--login">
+      <Card className="auth-card auth-card--login">
+        <div className="auth-card__brand">
+          <div className="brand-link__mark brand-link__mark--small">B</div>
+          <div>
+            <p className="eyebrow eyebrow--subtle">BU Scheduler</p>
+            <h1>Sign in</h1>
+          </div>
         </div>
-        <div className="auth-card__footer">
-          <span>Mobile-first</span>
-          <span>WCAG AA ready</span>
-          <span>No purple palette</span>
+        <p className="muted">Sign in to manage your timetable and groups.</p>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <Input label="Email or username" type="text" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} />
+          <Input label="Password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <div className="stack stack--small">
+            <Button variant="primary" size="lg" className="button--full-width" type="submit" disabled={submitting} leadingIcon={<ArrowRight size={18} />}>
+              {submitting ? 'Signing in…' : 'Sign in'}
+            </Button>
+            <Button variant="secondary" size="lg" className="button--full-width" type="button" onClick={handleStudentHubSignup} leadingIcon={<Sparkles size={18} />}>
+              Create account with StudentHub
+            </Button>
+          </div>
+        </form>
+        <div className="auth-card__list">
+          <div>
+            <strong>Your StudentHub identity powers BU Scheduler</strong>
+            <span>Use the same account across devices without creating a separate profile.</span>
+          </div>
+          <div>
+            <strong>Protected session</strong>
+            <span>No access tokens are placed in the URL.</span>
+          </div>
         </div>
+        {(localError || authError) ? <p className="form-error">{localError ?? authError}</p> : null}
       </Card>
     </div>
   );
 }
 
-export function LoginPage() {
+export function AuthCallbackPage() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const completeStudentHubCallback = useAuthStore((state) => state.completeStudentHubCallback);
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [message, setMessage] = useState('Completing sign-in...');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const code = searchParams.get('code');
+    const state = searchParams.get('state');
+
+    if (!code || !state) {
+      setStatus('error');
+      setError('Invalid callback request. Please retry sign-in.');
+      return;
+    }
+
+    const callbackCode = code;
+    const callbackState = state;
+
+    let cancelled = false;
+
+    async function finishCallback() {
+      try {
+        const session = await completeStudentHubCallback(callbackCode, callbackState);
+        const destination = normalizeReturnTo(session.returnTo ?? '/home');
+
+        if (cancelled) {
+          return;
+        }
+
+        setStatus('success');
+        setMessage('Sign-in complete. You can return to BU Scheduler now.');
+
+        if (window.opener && !window.opener.closed) {
+          try {
+            window.opener.location.replace(destination);
+            window.opener.postMessage({ type: 'bu-scheduler:auth-complete', destination }, window.location.origin);
+          } catch {
+            window.opener.postMessage({ type: 'bu-scheduler:auth-complete', destination }, window.location.origin);
+          }
+
+          window.setTimeout(() => {
+            window.close();
+          }, 400);
+          return;
+        }
+
+        window.location.replace(destination);
+      } catch (callbackError) {
+        if (cancelled) {
+          return;
+        }
+
+        setStatus('error');
+        setError(callbackError instanceof Error ? callbackError.message : 'Unable to complete sign-in');
+        clearStudentHubAuthRequest(callbackState);
+      }
+    }
+
+    finishCallback();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [completeStudentHubCallback, navigate, searchParams]);
+
+  return (
+    <div className="loading-screen loading-screen--auth" aria-live="polite" aria-busy={status === 'loading'}>
+      <div className="spinner" />
+      <p>{status === 'error' ? error : message}</p>
+      {status === 'error' ? (
+        <Button variant="secondary" size="md" onClick={() => navigate('/login')}>
+          Back to login
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+export function StudentHubAuthPage() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const state = searchParams.get('state');
+  const flow = searchParams.get('flow') === 'login' ? 'login' : 'signup';
+  const returnTo = normalizeReturnTo(searchParams.get('returnTo'));
+  const pendingRequest = state ? getStudentHubAuthRequest(state) : null;
+  const [email, setEmail] = useState(pendingRequest?.email ?? 'student@university.edu');
+  const [password, setPassword] = useState('password123');
+  const [displayName, setDisplayName] = useState(pendingRequest?.displayName ?? 'Student Hub User');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pendingRequest) {
+      setEmail(pendingRequest.email);
+      setDisplayName(pendingRequest.displayName);
+    }
+  }, [pendingRequest]);
+
+  async function handleContinue(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    if (!state || !pendingRequest) {
+      setError('This StudentHub sign-in session expired. Return to BU Scheduler and try again.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const authorizeResponse = await authorizeStudentHubPopup({
+        ...pendingRequest,
+        email: email.trim(),
+        displayName: displayName.trim() || email.trim().split('@')[0] || 'Student Hub User',
+      });
+
+      window.location.assign(`/auth/callback?code=${encodeURIComponent(authorizeResponse.code)}&state=${encodeURIComponent(authorizeResponse.state)}`);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Unable to continue with StudentHub');
+      setLoading(false);
+    }
+  }
+
+  if (!state) {
+    return (
+      <div className="auth-layout auth-layout--centered">
+        <Card className="auth-card auth-card--login">
+          <p className="eyebrow eyebrow--subtle">StudentHub</p>
+          <h1>Invalid sign-in session</h1>
+          <p className="muted">Return to BU Scheduler and open StudentHub sign-up again.</p>
+          <Button variant="primary" onClick={() => navigate('/login')}>
+            Back to login
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="auth-layout auth-layout--centered auth-layout--popup">
+      <Card className="auth-card auth-card--login auth-card--popup">
+        <p className="eyebrow eyebrow--subtle">StudentHub official auth</p>
+        <h1>{flow === 'signup' ? 'Create your StudentHub account' : 'Sign in to StudentHub'}</h1>
+        <p className="muted">Complete this step, then you will be returned to BU Scheduler already authenticated.</p>
+        <form className="auth-form" onSubmit={handleContinue}>
+          <Input label="StudentHub email or username" type="text" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} />
+          <Input label="Password" type="password" autoComplete={flow === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} />
+          <Input label="Display name" type="text" autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          <Button variant="primary" size="lg" className="button--full-width" type="submit" disabled={loading} leadingIcon={<ArrowRight size={18} />}>
+            {loading ? 'Continuing…' : 'Continue to BU Scheduler'}
+          </Button>
+        </form>
+        <p className="form-note">Return to BU Scheduler after StudentHub verifies your identity.</p>
+        {error ? <p className="form-error">{error}</p> : null}
+      </Card>
+      <div className="auth-popup__footer">
+        <span>Callback will return to</span>
+        <strong>{returnTo}</strong>
+      </div>
+    </div>
+  );
   return (
     <div className="auth-layout auth-layout--centered">
       <Card className="auth-card auth-card--login">

@@ -162,6 +162,13 @@ function authorizeRequest(req: Request, res: Response) {
   try {
     const token = header.slice('Bearer '.length);
     const payload = jwt.verify(token, jwtSecret) as AuthTokenPayload;
+    
+    // Check if token has been revoked
+    if (multiAppAuthStore.isTokenRevoked(payload.jti)) {
+      respondError(res, 401, 'Token has been revoked');
+      return null;
+    }
+
     const user = multiAppAuthStore.getUser(payload.uid);
 
     if (!user) {
@@ -212,15 +219,50 @@ function findUserByEmail(email: string) {
   return Array.from(multiAppAuthStore.users.values()).find((user) => user.email.toLowerCase() === email.toLowerCase()) ?? null;
 }
 
-function resolveStudentHubUser(email: string, displayName: string) {
-  const existing = findUserByEmail(email);
+function resolveStudentHubUser(email: string, displayName: string, studenthubId?: string) {
+  // First, try to find by StudentHub ID if provided
+  if (studenthubId) {
+    const existingByStudentHubId = multiAppAuthStore.getUserByStudentHubId(studenthubId);
+    if (existingByStudentHubId) {
+      // Update profile info if changed
+      existingByStudentHubId.displayName = displayName || existingByStudentHubId.displayName;
+      if (email && email !== existingByStudentHubId.email) {
+        existingByStudentHubId.email = email;
+      }
+      return existingByStudentHubId;
+    }
+  }
 
+  // Second, try to find by email
+  const existing = findUserByEmail(email);
   if (existing) {
+    // Link StudentHub ID if not already linked
+    if (studenthubId && !existing.studenthubId) {
+      multiAppAuthStore.linkStudentHubIdentity(existing.uid, studenthubId);
+      multiAppAuthStore.addAuditLog(existing.uid, 'account_linked', { 
+        provider: 'studenthub',
+        email,
+        studenthubId,
+      }, 'studenthub', 'success');
+    }
     existing.displayName = displayName || existing.displayName;
     return existing;
   }
 
-  return multiAppAuthStore.createUser(email, 'studenthub-oauth', displayName || 'StudentHub User');
+  // Create new user
+  const newUser = multiAppAuthStore.createUser(email, 'studenthub-oauth', displayName || 'StudentHub User');
+  if (studenthubId) {
+    multiAppAuthStore.linkStudentHubIdentity(newUser.uid, studenthubId);
+  }
+  
+  multiAppAuthStore.addAuditLog(newUser.uid, 'account_created', {
+    provider: 'studenthub',
+    email,
+    studenthubId,
+    displayName,
+  }, 'studenthub', 'success');
+
+  return newUser;
 }
 
 app.get('/api/health', (_req: Request, res: Response) => {
@@ -249,6 +291,8 @@ app.get('/api/spec', (_req: Request, res: Response) => {
         'GET /api/auth/authorized-apps',
         'POST /api/auth/revoke-app',
         'GET /api/auth/verify',
+        'POST /api/auth/logout',
+        'GET /api/auth/audit-log',
         'GET /api/shared-data/:dataType',
         'POST /api/shared-data/snapshot',
         'GET /api/shared-data/audit-log',
@@ -280,6 +324,12 @@ app.post('/api/auth/signup', (req: Request, res: Response) => {
     return;
   }
 
+  multiAppAuthStore.addAuditLog(user.uid, 'account_created', {
+    provider: 'local',
+    email,
+    displayName,
+  }, 'buschedule', 'success');
+
   res.status(201).json({
     ...buildAuthResponse(user.uid),
     message: 'Account created successfully',
@@ -299,6 +349,10 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
     respondError(res, 401, 'Invalid credentials');
     return;
   }
+
+  multiAppAuthStore.addAuditLog(user.uid, 'local_login', {
+    email,
+  }, 'buschedule', 'success');
 
   res.json(buildAuthResponse(user.uid));
 });
@@ -339,7 +393,7 @@ app.post('/api/auth/studenthub/authorize', (req: Request, res: Response) => {
 });
 
 app.post('/api/auth/studenthub/exchange', (req: Request, res: Response) => {
-  const { code, state, codeVerifier } = req.body as Record<string, string | undefined>;
+  const { code, state, codeVerifier, studenthubId } = req.body as Record<string, string | undefined>;
 
   if (!code || !state || !codeVerifier) {
     respondError(res, 400, 'code, state, and codeVerifier are required');
@@ -376,15 +430,24 @@ app.post('/api/auth/studenthub/exchange', (req: Request, res: Response) => {
   requestRecord.consumedAt = new Date().toISOString();
   studentHubAuthRequests.delete(code);
 
-  const user = resolveStudentHubUser(requestRecord.email, requestRecord.displayName);
+  // Use StudentHub ID if provided for canonical identity linking
+  const user = resolveStudentHubUser(requestRecord.email, requestRecord.displayName, studenthubId);
   user.metadata.lastLogin = new Date().toISOString();
   user.metadata.loginCount += 1;
+
+  // Log StudentHub login
+  multiAppAuthStore.addAuditLog(user.uid, 'studenthub_login', {
+    email: requestRecord.email,
+    studenthubId,
+    flow: requestRecord.flow,
+  }, 'studenthub', 'success');
 
   res.json({
     ...buildAuthResponse(user.uid),
     returnTo: requestRecord.returnTo,
     nonce: requestRecord.nonce,
     state: requestRecord.state,
+    isNewAccount: requestRecord.flow === 'signup',
   });
 });
 
@@ -429,6 +492,12 @@ app.post('/api/auth/authorize-app', (req: Request, res: Response) => {
   const grantedPermissions = parsePermissions(permissions);
   const appEntry = multiAppAuthStore.authorizeApp(auth.user, appRecord.appId, appRecord.appName, grantedPermissions);
 
+  multiAppAuthStore.addAuditLog(auth.user.uid, 'app_authorized', {
+    appId: appRecord.appId,
+    appName: appRecord.appName,
+    permissions: grantedPermissions,
+  }, appRecord.appId, 'success');
+
   res.status(201).json({
     success: true,
     message: `${appEntry.appName} has been authorized`,
@@ -462,6 +531,11 @@ app.post('/api/auth/revoke-app', (req: Request, res: Response) => {
   }
 
   multiAppAuthStore.revokeAppAccess(auth.user, appId);
+  
+  multiAppAuthStore.addAuditLog(auth.user.uid, 'app_revoked', {
+    appId,
+  }, appId, 'success');
+
   res.json({ success: true, message: 'App access has been revoked' });
 });
 
@@ -478,6 +552,42 @@ app.get('/api/auth/verify', (req: Request, res: Response) => {
       ...multiAppAuthStore.serializeUser(auth.user),
       authorizedApps: auth.user.authorizedApps,
     },
+  });
+});
+
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  const auth = authorizeRequest(req, res);
+  if (!auth) {
+    return;
+  }
+
+  // Revoke the current token
+  multiAppAuthStore.revokeToken(auth.payload.jti);
+
+  // Log the logout
+  multiAppAuthStore.addAuditLog(auth.user.uid, 'logout', {
+    appId: auth.payload.sourceApp,
+  }, auth.payload.sourceApp, 'success');
+
+  res.json({
+    success: true,
+    message: 'Logged out successfully',
+  });
+});
+
+app.get('/api/auth/audit-log', (req: Request, res: Response) => {
+  const auth = authorizeRequest(req, res);
+  if (!auth) {
+    return;
+  }
+
+  const limit = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : 50;
+  const logs = multiAppAuthStore.getAuditLogs(auth.user.uid, Number.isFinite(limit) ? limit : 50);
+
+  res.json({
+    success: true,
+    logs,
+    count: logs.length,
   });
 });
 
