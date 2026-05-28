@@ -652,11 +652,13 @@ export function GroupsPage() {
 
     return (
       <PageFrame
+        id="groups-page-frame"
         eyebrow="Groups"
         title="Find your course group"
         description="Join a group to access the timetable, chat, and updates."
         action={
           <Button
+            id="join-by-id-button"
             variant="secondary"
             leadingIcon={<UserPlus size={16} />}
             onClick={() => setJoinModalOpen(true)}
@@ -740,12 +742,13 @@ export function GroupsPage() {
 
   return (
     <PageFrame
-      eyebrow="Groups"
+      id="groups-page-frame"
       title="Your groups and course cohorts"
       description="Browse course groups, join one, or jump into your existing groups."
       action={
         <div style={styles.toolbar}>
           <Button
+            id="join-group-button"
             variant="secondary"
             size="sm"
             leadingIcon={<UserPlus size={16} />}

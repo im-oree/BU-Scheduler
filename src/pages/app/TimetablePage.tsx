@@ -1197,7 +1197,7 @@ function CardSkeleton({ index }: { index: number }) {
 
 function LoadingState() {
   return (
-    <PageFrame eyebrow="Timetable" title="Loading your schedule…">
+    <PageFrame id="timetable-page-frame" eyebrow="Timetable" title="Loading your schedule…">
       <DaySelectorSkeleton />
       <div
         className="skeleton"
@@ -1241,7 +1241,7 @@ function ErrorState({
   onRetry: () => void;
 }) {
   return (
-    <PageFrame eyebrow="Timetable" title="Something went wrong">
+    <PageFrame id="timetable-page-frame" eyebrow="Timetable" title="Something went wrong">
       <Card
         style={{
           display: 'grid',

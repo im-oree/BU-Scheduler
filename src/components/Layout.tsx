@@ -37,6 +37,7 @@ import {
 } from 'react';
 import { fetchUserGroups } from '../lib/studenthubData';
 import { BottomNav } from './BottomNav';
+import { Onboarding } from './Onboarding';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1006,6 +1007,7 @@ export function AppShell() {
           BOTTOM NAVIGATION (mobile only — handled inside BottomNav)
           ═══════════════════════════════════════════════════════ */}
       <BottomNav />
+      <Onboarding />
     </div>
   );
 }

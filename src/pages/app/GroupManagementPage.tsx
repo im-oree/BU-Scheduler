@@ -1,22 +1,22 @@
 // src/pages/groups/GroupManagementPage.tsx
-// BU Scheduler — Group Management (Option C: React Query + Student Hub services)
-// Full feature parity with Student Hub's GroupManagementPage
+// BU Scheduler — Group Management (Mobile-friendly + redesigned)
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
+  ArrowLeft,
+  Bell,
   CalendarDays,
   CheckCircle,
   Crown,
+  Edit2,
   Lock,
-  MessageCircleOff,
   MessageSquare,
   MoreVertical,
   Plus,
   Power,
   RefreshCw,
-  Search,
   Send,
   Settings2,
   Share2,
@@ -27,12 +27,6 @@ import {
   UserPlus,
   Users,
   XCircle,
-  Bell,
-  MapPin,
-  Clock,
-  Edit2,
-  Hash,
-  Info,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -59,7 +53,6 @@ import {
   Input,
   Modal,
   Select,
-  Tabs,
   Textarea,
 } from '../../components/ui';
 import { GroupChatMessageItem, PageFrame } from '../../components/shared';
@@ -72,24 +65,17 @@ import {
   fetchGroupMembers,
   fetchGroupTimetableEntries,
   getGroupRoleFlags,
-  sendGroupChatMessage,
   type StudentHubAnnouncement,
   type StudentHubChatMessage,
   type StudentHubMember,
   type StudentHubTimetableEntry,
-  type StudentHubProfile,
 } from '../../lib/studenthubData';
 import { getFirebaseApp } from '../../lib/firebase';
 import { useAuthStore } from '../../store/useAuthStore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Section =
-  | 'timetable'
-  | 'members'
-  | 'chat'
-  | 'announcements'
-  | 'settings';
+type Section = 'timetable' | 'members' | 'chat' | 'announcements' | 'settings';
 
 interface NavItem {
   id: Section;
@@ -164,21 +150,350 @@ function timeAgo(isoOrNumber: string | number): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-// ─── Skeletons ────────────────────────────────────────────────────────────────
+function useIsMobile(breakpoint = 900) {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia(`(max-width: ${breakpoint}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [breakpoint]);
+
+  return isMobile;
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const styles = {
+  shell: {
+    display: 'grid',
+    gap: 16,
+    minWidth: 0,
+  } as CSSProperties,
+
+  layoutDesktop: {
+    display: 'grid',
+    gridTemplateColumns: '240px 1fr',
+    gap: 16,
+    alignItems: 'start',
+    minWidth: 0,
+  } as CSSProperties,
+
+  layoutMobile: {
+    display: 'grid',
+    gap: 14,
+    minWidth: 0,
+  } as CSSProperties,
+
+  sidebarCard: {
+    padding: 12,
+    position: 'sticky',
+    top: 76,
+    display: 'grid',
+    gap: 4,
+  } as CSSProperties,
+
+  navItem: (active: boolean) => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '10px 12px',
+    borderRadius: 10,
+    border: 'none',
+    background: active
+      ? 'var(--primary-soft, #F2F8E6)'
+      : 'transparent',
+    color: active
+      ? 'var(--tertiary, #5A8A00)'
+      : 'var(--text, #1C1C1E)',
+    fontWeight: active ? 600 : 500,
+    fontSize: '0.88rem',
+    cursor: 'pointer',
+    textAlign: 'left' as const,
+    width: '100%',
+    transition: 'background 160ms ease',
+  }) as (active: boolean) => CSSProperties,
+
+  navItemLabel: {
+    flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  } as CSSProperties,
+
+  navCount: {
+    fontSize: '0.7rem',
+    padding: '2px 7px',
+    borderRadius: 999,
+    background: 'var(--bg-muted, #F1F3F8)',
+    color: 'var(--muted, #6B7280)',
+    fontWeight: 600,
+  } as CSSProperties,
+
+  mobileTabBar: {
+    display: 'flex',
+    gap: 6,
+    overflowX: 'auto',
+    padding: '4px 2px',
+    scrollbarWidth: 'none',
+    WebkitOverflowScrolling: 'touch',
+  } as CSSProperties,
+
+  mobileTab: (active: boolean) => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 14px',
+    borderRadius: 999,
+    border: '1px solid',
+    borderColor: active
+      ? 'var(--primary, #7CB518)'
+      : 'var(--line, #E6E8EC)',
+    background: active
+      ? 'var(--primary-soft, #F2F8E6)'
+      : 'var(--surface, #FFFFFF)',
+    color: active
+      ? 'var(--tertiary, #5A8A00)'
+      : 'var(--muted, #6B7280)',
+    fontSize: '0.82rem',
+    fontWeight: active ? 600 : 500,
+    whiteSpace: 'nowrap' as const,
+    cursor: 'pointer',
+    flexShrink: 0,
+  }) as (active: boolean) => CSSProperties,
+
+  content: {
+    display: 'grid',
+    gap: 14,
+    minWidth: 0,
+  } as CSSProperties,
+
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    flexWrap: 'wrap',
+    marginBottom: 14,
+    minWidth: 0,
+  } as CSSProperties,
+
+  sectionTitle: {
+    display: 'grid',
+    gap: 4,
+    minWidth: 0,
+  } as CSSProperties,
+
+  sectionH2: {
+    fontSize: '1.05rem',
+    margin: 0,
+  } as CSSProperties,
+
+  sectionDesc: {
+    fontSize: '0.82rem',
+    color: 'var(--muted, #6B7280)',
+    margin: 0,
+  } as CSSProperties,
+
+  sectionActions: {
+    display: 'flex',
+    gap: 8,
+    flexWrap: 'wrap',
+  } as CSSProperties,
+
+  classCard: (cancelled: boolean) => ({
+    padding: 14,
+    opacity: cancelled ? 0.7 : 1,
+    display: 'grid',
+    gap: 10,
+    position: 'relative' as const,
+    overflow: 'visible' as const,
+  }) as (c: boolean) => CSSProperties,
+
+  classHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
+    minWidth: 0,
+  } as CSSProperties,
+
+  classTitleWrap: {
+    display: 'grid',
+    gap: 4,
+    minWidth: 0,
+    flex: 1,
+  } as CSSProperties,
+
+  classTitle: {
+    fontSize: '0.95rem',
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  } as CSSProperties,
+
+  classMeta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px 14px',
+    fontSize: '0.78rem',
+    color: 'var(--muted, #6B7280)',
+  } as CSSProperties,
+
+  classMetaItem: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+  } as CSSProperties,
+
+  actionMenu: {
+    position: 'absolute' as const,
+    right: 0,
+    top: 38,
+    minWidth: 180,
+    zIndex: 20,
+    padding: 6,
+    display: 'grid',
+    gap: 2,
+    background: 'var(--surface, #FFFFFF)',
+    border: '1px solid var(--line, #E6E8EC)',
+    borderRadius: 12,
+    boxShadow: '0 12px 36px rgba(0,0,0,0.12)',
+  } as CSSProperties,
+
+  memberRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '12px',
+    borderRadius: 10,
+    background: 'var(--bg-muted, #F1F3F8)',
+    flexWrap: 'wrap',
+    minWidth: 0,
+  } as CSSProperties,
+
+  memberIdentity: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0,
+    flex: '1 1 200px',
+  } as CSSProperties,
+
+  memberIdentityText: {
+    display: 'grid',
+    gap: 2,
+    minWidth: 0,
+    flex: 1,
+  } as CSSProperties,
+
+  memberName: {
+    fontSize: '0.88rem',
+    fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  } as CSSProperties,
+
+  memberSub: {
+    fontSize: '0.74rem',
+    color: 'var(--muted, #6B7280)',
+  } as CSSProperties,
+
+  memberActions: {
+    display: 'flex',
+    gap: 6,
+    flexWrap: 'wrap',
+  } as CSSProperties,
+
+  searchResults: {
+    marginTop: 10,
+    maxHeight: 240,
+    overflowY: 'auto',
+    display: 'grid',
+    gap: 6,
+  } as CSSProperties,
+
+  selectedCard: {
+    marginTop: 12,
+    padding: 14,
+  } as CSSProperties,
+
+  infoRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    padding: '14px 0',
+    borderBottom: '1px solid var(--divider, #ECEEF3)',
+    flexWrap: 'wrap',
+  } as CSSProperties,
+
+  infoRowLast: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    padding: '14px 0 0',
+    flexWrap: 'wrap',
+  } as CSSProperties,
+
+  infoLabel: {
+    display: 'grid',
+    gap: 4,
+    minWidth: 0,
+    flex: 1,
+  } as CSSProperties,
+
+  infoTitle: {
+    fontSize: '0.9rem',
+    fontWeight: 600,
+  } as CSSProperties,
+
+  infoDesc: {
+    fontSize: '0.78rem',
+    color: 'var(--muted, #6B7280)',
+  } as CSSProperties,
+
+  skeleton: {
+    height: 76,
+    borderRadius: 12,
+    background:
+      'linear-gradient(90deg, var(--bg-muted, #F1F3F8) 0%, var(--surface-2, #E8EAF0) 50%, var(--bg-muted, #F1F3F8) 100%)',
+    backgroundSize: '200% 100%',
+    animation: 'skeleton-wave 1.5s ease-in-out infinite',
+  } as CSSProperties,
+
+  chatBox: {
+    marginTop: 14,
+    maxHeight: 460,
+    overflowY: 'auto',
+    display: 'grid',
+    gap: 6,
+    padding: 8,
+    background: 'var(--bg-muted, #F1F3F8)',
+    borderRadius: 12,
+  } as CSSProperties,
+} as const;
+
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 function SectionSkeleton() {
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       {[1, 2, 3].map((i) => (
-        <div
-          key={i}
-          style={{
-            height: 72,
-            borderRadius: 12,
-            backgroundColor: 'var(--color-surface)',
-            animation: 'pulse 1.5s ease-in-out infinite',
-          }}
-        />
+        <div key={i} style={styles.skeleton} aria-hidden />
       ))}
     </div>
   );
@@ -193,6 +508,7 @@ export function GroupManagementPage() {
   const userId = useAuthStore((s) => s.session?.user.uid);
   const db = getFirestore(getFirebaseApp());
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile(900);
 
   // ─── UI state ─────────────────────────────────────────────────────────────
 
@@ -216,16 +532,14 @@ export function GroupManagementPage() {
     email: string;
   } | null>(null);
   const [repSearch, setRepSearch] = useState('');
-  const [selectedRepCandidate, setSelectedRepCandidate] = useState<
-    StudentHubMember | null
-  >(null);
+  const [selectedRepCandidate, setSelectedRepCandidate] =
+    useState<StudentHubMember | null>(null);
   const [availableUsers, setAvailableUsers] = useState<
     Array<{ id: string; fullName: string; email: string }>
   >([]);
 
   // Chat state
   const [chatEnabled, setChatEnabled] = useState(true);
-  const [sendingMessage, setSendingMessage] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(
     null,
   );
@@ -392,9 +706,7 @@ export function GroupManagementPage() {
           snap.docs.map((d) => ({
             id: d.id,
             fullName: String(
-              d.data().fullName ??
-                d.data().displayName ??
-                'Unknown',
+              d.data().fullName ?? d.data().displayName ?? 'Unknown',
             ),
             email: String(d.data().email ?? ''),
           })),
@@ -428,8 +740,7 @@ export function GroupManagementPage() {
             courseName: String(
               data.className ?? data.courseName ?? 'Untitled class',
             ),
-            dayIndex:
-              typeof data.dayIndex === 'number' ? data.dayIndex : 0,
+            dayIndex: typeof data.dayIndex === 'number' ? data.dayIndex : 0,
             day: String(data.dayOfWeek ?? data.day ?? '—'),
             startTime: String(data.startTime ?? ''),
             endTime: String(data.endTime ?? ''),
@@ -470,9 +781,7 @@ export function GroupManagementPage() {
           const rawTime = String(data.createdAt ?? '');
           return {
             id: d.id,
-            author: String(
-              data.author ?? data.userName ?? 'Member',
-            ),
+            author: String(data.author ?? data.userName ?? 'Member'),
             role: String(data.role ?? 'Member'),
             time: rawTime.length >= 16 ? rawTime.slice(11, 16) : rawTime,
             text: String(data.text ?? data.message ?? ''),
@@ -504,26 +813,23 @@ export function GroupManagementPage() {
       (snap) => {
         const items: StudentHubAnnouncement[] = snap.docs.map((d) => {
           const data = d.data() as Record<string, unknown>;
-          const rawDate = String(
-            data.createdAt ?? data.timestamp ?? '',
-          );
+          const rawDate = String(data.createdAt ?? data.timestamp ?? '');
           return {
             id: d.id,
             title: String(data.title ?? 'Announcement'),
             body: String(
-              data.body ?? data.detail ?? data.message ?? data.content ?? '',
+              data.body ??
+                data.detail ??
+                data.message ??
+                data.content ??
+                '',
             ),
             date: rawDate.slice(0, 10),
-            author: String(
-              data.author ?? data.userName ?? 'Group Rep',
-            ),
+            author: String(data.author ?? data.userName ?? 'Group Rep'),
           };
         });
         setLiveAnnouncements(items);
-        queryClient.setQueryData(
-          ['group-announcements', groupId],
-          items,
-        );
+        queryClient.setQueryData(['group-announcements', groupId], items);
       },
       (err) =>
         console.warn('[BUScheduler] announcements listener:', err),
@@ -538,6 +844,21 @@ export function GroupManagementPage() {
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [chatMessages.length, section]);
+
+  // ─── Close action menu on outside click ───────────────────────────────────
+
+  useEffect(() => {
+    if (!classActionsId) return;
+    const handler = () => setClassActionsId(null);
+    const timer = setTimeout(
+      () => document.addEventListener('click', handler),
+      0,
+    );
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handler);
+    };
+  }, [classActionsId]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ACTIONS: TIMETABLE
@@ -588,13 +909,8 @@ export function GroupManagementPage() {
       };
 
       if (editingClassId) {
-        // Update existing class
-        await updateDoc(
-          doc(db, 'groupTimetables', editingClassId),
-          payload,
-        );
+        await updateDoc(doc(db, 'groupTimetables', editingClassId), payload);
       } else {
-        // Create new class
         await addDoc(collection(db, 'groupTimetables'), {
           ...payload,
           createdAt: serverTimestamp(),
@@ -605,7 +921,6 @@ export function GroupManagementPage() {
       setClassFormOpen(false);
       setEditingClassId(null);
       setClassFormData(EMPTY_CLASS_FORM);
-      // onSnapshot auto-updates liveTimetable
     } catch (err) {
       console.error('[BUScheduler] save class:', err);
     } finally {
@@ -626,10 +941,7 @@ export function GroupManagementPage() {
     }
   }
 
-  async function handleCancelClass(
-    classId: string,
-    className: string,
-  ) {
+  async function handleCancelClass(classId: string, className: string) {
     const reason = window.prompt(
       `Why is "${className}" being cancelled?`,
       'No reason provided',
@@ -644,7 +956,6 @@ export function GroupManagementPage() {
         cancelledAt: serverTimestamp(),
       });
 
-      // Send notification to group
       if (groupId) {
         await addDoc(
           collection(db, 'courseGroups', groupId, 'notifications'),
@@ -668,10 +979,7 @@ export function GroupManagementPage() {
     }
   }
 
-  async function handleRestoreClass(
-    classId: string,
-    className: string,
-  ) {
+  async function handleRestoreClass(classId: string, className: string) {
     if (!window.confirm(`Restore "${className}"? Members will be notified.`))
       return;
 
@@ -746,7 +1054,6 @@ export function GroupManagementPage() {
         ? (rawGroup.members as Array<Record<string, unknown>>)
         : [];
 
-      // Check if already a member
       if (
         currentMembers.some(
           (m) => String(m.userId ?? '') === selectedNewMember.id,
@@ -794,7 +1101,6 @@ export function GroupManagementPage() {
       (m) => String(m.userId ?? '') !== memberId,
     );
 
-    // Also remove from reps if they're a rep
     const nextReps = currentReps.filter((id) => id !== memberId);
 
     setBusy(true);
@@ -813,14 +1119,13 @@ export function GroupManagementPage() {
     }
   }
 
-  async function handleAssignRep() {
-    if (!selectedRepCandidate || !groupId) return;
+  async function handleAssignRep(candidate?: StudentHubMember) {
+    const target = candidate ?? selectedRepCandidate;
+    if (!target || !groupId) return;
     setBusy(true);
     try {
       await updateDoc(doc(db, 'courseGroups', groupId), {
-        groupReps: [
-          ...new Set([...currentReps, selectedRepCandidate.id]),
-        ],
+        groupReps: [...new Set([...currentReps, target.id])],
         updatedAt: serverTimestamp(),
       });
       setSelectedRepCandidate(null);
@@ -870,9 +1175,7 @@ export function GroupManagementPage() {
     if (!window.confirm('Delete this message?')) return;
     setDeletingMessageId(messageId);
     try {
-      await deleteDoc(
-        doc(db, 'groupChats', groupId, 'messages', messageId),
-      );
+      await deleteDoc(doc(db, 'groupChats', groupId, 'messages', messageId));
     } catch (err) {
       console.error('[BUScheduler] delete message:', err);
     } finally {
@@ -882,9 +1185,7 @@ export function GroupManagementPage() {
 
   async function handleClearChat() {
     if (
-      !window.confirm(
-        'Delete ALL chat messages? This cannot be undone.',
-      )
+      !window.confirm('Delete ALL chat messages? This cannot be undone.')
     )
       return;
     if (!groupId) return;
@@ -892,7 +1193,6 @@ export function GroupManagementPage() {
     setBusy(true);
     try {
       let deletedCount = 0;
-      // Delete in batches of 100
       while (true) {
         const snap = await getDocs(
           firestoreQuery(
@@ -952,13 +1252,7 @@ export function GroupManagementPage() {
     if (!groupId) return;
     try {
       await deleteDoc(
-        doc(
-          db,
-          'courseGroups',
-          groupId,
-          'notifications',
-          announcementId,
-        ),
+        doc(db, 'courseGroups', groupId, 'notifications', announcementId),
       );
     } catch (err) {
       console.error('[BUScheduler] delete announcement:', err);
@@ -992,8 +1286,6 @@ export function GroupManagementPage() {
       }
       setBusy(true);
       try {
-        // In production you'd hash this — storing plain for simplicity
-        // matching Student Hub's hashPassword pattern
         await updateGroupField({ groupPassword: passwordInput.trim() });
         setPasswordModalOpen(false);
         setPasswordInput('');
@@ -1026,7 +1318,11 @@ export function GroupManagementPage() {
     const text = `Join ${group?.title ?? groupId}: ${url}`;
     try {
       if (navigator.share) {
-        await navigator.share({ title: `Join ${group?.title ?? groupId}`, text, url });
+        await navigator.share({
+          title: `Join ${group?.title ?? groupId}`,
+          text,
+          url,
+        });
         return;
       }
     } catch {
@@ -1082,10 +1378,11 @@ export function GroupManagementPage() {
               : `Group "${groupId}" does not exist.`
           }
           action={
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Button
                 variant="primary"
-                leadingIcon={<RefreshCw size={16} />}
+                size="sm"
+                leadingIcon={<RefreshCw size={14} />}
                 onClick={() => {
                   void groupQuery.refetch();
                   void rawGroupQuery.refetch();
@@ -1093,7 +1390,11 @@ export function GroupManagementPage() {
               >
                 Retry
               </Button>
-              <Button variant="secondary" onClick={() => navigate(-1)}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate(-1)}
+              >
                 Go back
               </Button>
             </div>
@@ -1117,6 +1418,7 @@ export function GroupManagementPage() {
           action={
             <Button
               variant="secondary"
+              size="sm"
               onClick={() => navigate(`/groups/${groupId}`)}
             >
               Back to group
@@ -1130,12 +1432,104 @@ export function GroupManagementPage() {
   // ─── Nav items ────────────────────────────────────────────────────────────
 
   const navItems: NavItem[] = [
-    { id: 'timetable', label: 'Timetable', icon: CalendarDays, count: timetable.length },
+    {
+      id: 'timetable',
+      label: 'Timetable',
+      icon: CalendarDays,
+      count: timetable.length,
+    },
     { id: 'members', label: 'Members', icon: Users, count: members.length },
-    { id: 'chat', label: 'Chat', icon: MessageSquare, count: chatMessages.length },
-    { id: 'announcements', label: 'Announcements', icon: Bell, count: announcements.length },
+    {
+      id: 'chat',
+      label: 'Chat',
+      icon: MessageSquare,
+      count: chatMessages.length,
+    },
+    {
+      id: 'announcements',
+      label: 'Announcements',
+      icon: Bell,
+      count: announcements.length,
+    },
     { id: 'settings', label: 'Settings', icon: Settings2 },
   ];
+
+  // ─── Renderers (DRY) ──────────────────────────────────────────────────────
+
+  function renderSidebar() {
+    if (isMobile) {
+      return (
+        <div style={styles.mobileTabBar} className="scroll-hide">
+          {navItems.map(({ id, label, icon: Icon, count }) => (
+            <button
+              key={id}
+              type="button"
+              style={styles.mobileTab(section === id)}
+              onClick={() => setSection(id)}
+            >
+              <Icon size={14} />
+              <span>{label}</span>
+              {count != null && count > 0 && (
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    background:
+                      section === id
+                        ? 'var(--primary, #7CB518)'
+                        : 'var(--bg-muted, #F1F3F8)',
+                    color:
+                      section === id
+                        ? '#fff'
+                        : 'var(--muted, #6B7280)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <Card style={styles.sidebarCard}>
+        {navItems.map(({ id, label, icon: Icon, count }) => (
+          <button
+            key={id}
+            type="button"
+            style={styles.navItem(section === id)}
+            onClick={() => setSection(id)}
+          >
+            <Icon size={16} />
+            <span style={styles.navItemLabel}>{label}</span>
+            {count != null && count > 0 && (
+              <span style={styles.navCount}>{count}</span>
+            )}
+          </button>
+        ))}
+      </Card>
+    );
+  }
+
+  function renderSectionHeader(
+    title: string,
+    desc: string,
+    actions?: React.ReactNode,
+  ) {
+    return (
+      <div style={styles.sectionHeader}>
+        <div style={styles.sectionTitle}>
+          <h2 style={styles.sectionH2}>{title}</h2>
+          <p style={styles.sectionDesc}>{desc}</p>
+        </div>
+        {actions && <div style={styles.sectionActions}>{actions}</div>}
+      </div>
+    );
+  }
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -1143,68 +1537,53 @@ export function GroupManagementPage() {
     <PageFrame
       eyebrow="Group management"
       title={group.title}
-      description={`${group.courseCode} · Level ${group.level} · ${members.length} members`}
+      description={`${group.courseCode} · Level ${group.level} · ${members.length} ${members.length === 1 ? 'member' : 'members'}`}
       action={
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Button
             variant="ghost"
-            leadingIcon={<Share2 size={16} />}
+            size="sm"
+            leadingIcon={<Share2 size={14} />}
             onClick={() => void handleShareInvite()}
           >
-            Share invite
+            Share
           </Button>
           <Button
             variant="secondary"
+            size="sm"
+            leadingIcon={<ArrowLeft size={14} />}
             onClick={() => navigate(`/groups/${groupId}`)}
           >
-            Back to group
+            Back
           </Button>
         </div>
       }
     >
-      <div
-        className="section-block"
-        style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 16 }}
-      >
-        {/* ── Sidebar nav ──────────────────────────────────────────────── */}
-        <Card>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {navItems.map(({ id, label, icon: Icon, count }) => (
-              <Button
-                key={id}
-                variant={section === id ? 'primary' : 'ghost'}
-                leadingIcon={<Icon size={16} />}
-                onClick={() => setSection(id)}
-                fullWidth
-              >
-                {label}
-                {count != null && count > 0 && (
-                  <Badge tone="neutral" style={{ marginLeft: 'auto' }}>
-                    {count}
-                  </Badge>
-                )}
-              </Button>
-            ))}
-          </div>
-        </Card>
+      <style>{`
+        .scroll-hide::-webkit-scrollbar { display: none; }
+        @keyframes skeleton-wave {
+          0%   { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+      `}</style>
 
-        {/* ── Content area ─────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gap: 16 }}>
-          {/* ══ TIMETABLE ═════════════════════════════════════════════════ */}
+      <div style={isMobile ? styles.layoutMobile : styles.layoutDesktop}>
+        {/* ── Sidebar / Mobile tabs ───────────────────────────────────── */}
+        {renderSidebar()}
+
+        {/* ── Content area ────────────────────────────────────────────── */}
+        <div style={styles.content}>
+          {/* ══ TIMETABLE ══════════════════════════════════════════════ */}
           {section === 'timetable' && (
-            <Card>
-              <div className="table-header">
-                <div>
-                  <h2>Timetable</h2>
-                  <p className="muted">
-                    {timetable.length} class
-                    {timetable.length !== 1 ? 'es' : ''} scheduled.
-                  </p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+            <Card style={{ padding: 18 }}>
+              {renderSectionHeader(
+                'Timetable',
+                `${timetable.length} ${timetable.length === 1 ? 'class' : 'classes'} scheduled.`,
+                <>
                   <Button
                     variant="primary"
-                    leadingIcon={<Plus size={16} />}
+                    size="sm"
+                    leadingIcon={<Plus size={14} />}
                     onClick={openAddClass}
                   >
                     Add class
@@ -1212,15 +1591,16 @@ export function GroupManagementPage() {
                   {timetable.length > 0 && (
                     <Button
                       variant="ghost"
-                      leadingIcon={<Trash2 size={16} />}
+                      size="sm"
+                      leadingIcon={<Trash2 size={14} />}
                       loading={busy}
                       onClick={() => void handleDeleteAllTimetable()}
                     >
                       Delete all
                     </Button>
                   )}
-                </div>
-              </div>
+                </>,
+              )}
 
               {timetable.length === 0 ? (
                 <EmptyState
@@ -1229,7 +1609,8 @@ export function GroupManagementPage() {
                   action={
                     <Button
                       variant="primary"
-                      leadingIcon={<Plus size={16} />}
+                      size="sm"
+                      leadingIcon={<Plus size={14} />}
                       onClick={openAddClass}
                     >
                       Add first class
@@ -1237,7 +1618,7 @@ export function GroupManagementPage() {
                   }
                 />
               ) : (
-                <div className="timeline-list">
+                <div style={{ display: 'grid', gap: 10 }}>
                   {timetable.map((entry) => {
                     const isCancelled = Boolean(
                       (entry as Record<string, unknown>).isCancelled,
@@ -1249,134 +1630,147 @@ export function GroupManagementPage() {
                     return (
                       <Card
                         key={entry.id}
-                        className="timeline-card"
-                        style={{
-                          opacity: isCancelled ? 0.6 : 1,
-                          position: 'relative',
-                          overflow: 'visible',
-                        }}
+                        style={styles.classCard(isCancelled)}
                       >
-                        <div className="timeline-card__left">
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                            <Badge tone={isCancelled ? 'danger' : 'info'}>
-                              {entry.courseCode}
-                            </Badge>
-                            {isCancelled && (
-                              <Badge tone="danger">Cancelled</Badge>
-                            )}
-                          </div>
-                          <h3
-                            style={{
-                              textDecoration: isCancelled
-                                ? 'line-through'
-                                : undefined,
-                            }}
-                          >
-                            {entry.courseName}
-                          </h3>
-                          <p>{entry.day}</p>
-                          {isCancelled && cancelledReason && (
-                            <p
-                              className="muted"
-                              style={{ fontSize: 12, marginTop: 4 }}
-                            >
-                              Reason: {cancelledReason}
-                            </p>
-                          )}
-                        </div>
-                        <div className="timeline-card__right">
-                          <span>
-                            {fmt(entry.startTime)} – {fmt(entry.endTime)}
-                          </span>
-                          <span>{entry.venue}</span>
-                          <span>{entry.instructor}</span>
-                        </div>
-
-                        {/* Actions menu */}
-                        <div className="timeline-card__actions">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              setClassActionsId(
-                                classActionsId === entry.id
-                                  ? null
-                                  : entry.id,
-                              )
-                            }
-                          >
-                            <MoreVertical size={14} />
-                          </Button>
-
-                          {classActionsId === entry.id && (
-                            <Card
+                        <div style={styles.classHeader}>
+                          <div style={styles.classTitleWrap}>
+                            <div
                               style={{
-                                position: 'absolute',
-                                right: 0,
-                                top: 40,
-                                minWidth: 180,
-                                zIndex: 20,
-                                padding: 4,
+                                display: 'flex',
+                                gap: 6,
+                                flexWrap: 'wrap',
                               }}
                             >
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                fullWidth
-                                leadingIcon={<Edit2 size={14} />}
-                                onClick={() => openEditClass(entry)}
-                              >
-                                Edit class
-                              </Button>
-
-                              {isCancelled ? (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  fullWidth
-                                  leadingIcon={<CheckCircle size={14} />}
-                                  onClick={() =>
-                                    void handleRestoreClass(
-                                      entry.id,
-                                      entry.courseName,
-                                    )
-                                  }
-                                >
-                                  Restore class
-                                </Button>
-                              ) : (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  fullWidth
-                                  leadingIcon={<XCircle size={14} />}
-                                  onClick={() =>
-                                    void handleCancelClass(
-                                      entry.id,
-                                      entry.courseName,
-                                    )
-                                  }
-                                >
-                                  Cancel class
-                                </Button>
+                              <Badge tone={isCancelled ? 'danger' : 'info'}>
+                                {entry.courseCode}
+                              </Badge>
+                              {isCancelled && (
+                                <Badge tone="danger">Cancelled</Badge>
                               )}
+                            </div>
+                            <h3
+                              style={{
+                                ...styles.classTitle,
+                                textDecoration: isCancelled
+                                  ? 'line-through'
+                                  : undefined,
+                              }}
+                            >
+                              {entry.courseName}
+                            </h3>
+                          </div>
 
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                fullWidth
-                                leadingIcon={<Trash2 size={14} />}
-                                loading={deletingClassId === entry.id}
-                                onClick={() =>
-                                  void handleDeleteClass(entry.id)
-                                }
-                                style={{ color: 'var(--color-danger)' }}
-                              >
-                                Delete class
-                              </Button>
-                            </Card>
-                          )}
+                          <div
+                            style={{ position: 'relative' }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setClassActionsId(
+                                  classActionsId === entry.id
+                                    ? null
+                                    : entry.id,
+                                )
+                              }
+                              aria-label="Class actions"
+                            >
+                              <MoreVertical size={14} />
+                            </Button>
+
+                            {classActionsId === entry.id && (
+                              <div style={styles.actionMenu}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  fullWidth
+                                  leadingIcon={<Edit2 size={14} />}
+                                  onClick={() => openEditClass(entry)}
+                                >
+                                  Edit class
+                                </Button>
+
+                                {isCancelled ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    fullWidth
+                                    leadingIcon={<CheckCircle size={14} />}
+                                    onClick={() =>
+                                      void handleRestoreClass(
+                                        entry.id,
+                                        entry.courseName,
+                                      )
+                                    }
+                                  >
+                                    Restore
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    fullWidth
+                                    leadingIcon={<XCircle size={14} />}
+                                    onClick={() =>
+                                      void handleCancelClass(
+                                        entry.id,
+                                        entry.courseName,
+                                      )
+                                    }
+                                  >
+                                    Cancel
+                                  </Button>
+                                )}
+
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  fullWidth
+                                  leadingIcon={<Trash2 size={14} />}
+                                  loading={deletingClassId === entry.id}
+                                  onClick={() =>
+                                    void handleDeleteClass(entry.id)
+                                  }
+                                  style={{ color: 'var(--error, #EF4444)' }}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            )}
+                          </div>
                         </div>
+
+                        <div style={styles.classMeta}>
+                          <span style={styles.classMetaItem}>
+                            <CalendarDays size={12} />
+                            {entry.day}
+                          </span>
+                          <span style={styles.classMetaItem}>
+                            ⏰ {fmt(entry.startTime)} – {fmt(entry.endTime)}
+                          </span>
+                          <span style={styles.classMetaItem}>
+                            📍 {entry.venue}
+                          </span>
+                          <span style={styles.classMetaItem}>
+                            👤 {entry.instructor}
+                          </span>
+                        </div>
+
+                        {isCancelled && cancelledReason && (
+                          <p
+                            style={{
+                              fontSize: 12,
+                              color: 'var(--error, #EF4444)',
+                              padding: 8,
+                              background:
+                                'var(--error-soft, #FEE2E2)',
+                              borderRadius: 8,
+                            }}
+                          >
+                            <strong>Reason:</strong> {cancelledReason}
+                          </p>
+                        )}
                       </Card>
                     );
                   })}
@@ -1385,59 +1779,60 @@ export function GroupManagementPage() {
             </Card>
           )}
 
-          {/* ══ MEMBERS ═══════════════════════════════════════════════════ */}
+          {/* ══ MEMBERS ════════════════════════════════════════════════ */}
           {section === 'members' && (
-            <div style={{ display: 'grid', gap: 16 }}>
-              {/* Add member by search */}
-              <Card>
-                <div className="table-header">
-                  <div>
-                    <h2>Add member</h2>
-                    <p className="muted">
-                      Search for users by name or email to add them.
-                    </p>
-                  </div>
-                </div>
+            <div style={{ display: 'grid', gap: 14 }}>
+              {/* Add member */}
+              <Card style={{ padding: 18 }}>
+                {renderSectionHeader(
+                  'Add member',
+                  'Search for users by name or email to add them.',
+                )}
 
-                <div style={{ position: 'relative' }}>
-                  <Input
-                    label="Search users"
-                    placeholder="Search by name or email…"
-                    value={memberSearch}
-                    onChange={(e) => {
-                      setMemberSearch(e.target.value);
-                      setSelectedNewMember(null);
-                    }}
-                  />
-                </div>
+                <Input
+                  label="Search users"
+                  placeholder="Search by name or email…"
+                  value={memberSearch}
+                  onChange={(e) => {
+                    setMemberSearch(e.target.value);
+                    setSelectedNewMember(null);
+                  }}
+                />
 
                 {memberSearch && !selectedNewMember && (
-                  <div
-                    className="member-table member-table--dense"
-                    style={{ marginTop: 8, maxHeight: 200, overflowY: 'auto' }}
-                  >
+                  <div style={styles.searchResults}>
                     {filteredAvailableUsers.length === 0 ? (
-                      <p className="muted" style={{ padding: 12 }}>
+                      <p
+                        style={{
+                          color: 'var(--muted)',
+                          fontSize: '0.86rem',
+                          padding: 12,
+                        }}
+                      >
                         No users found.
                       </p>
                     ) : (
                       filteredAvailableUsers.slice(0, 6).map((u) => (
                         <div
                           key={u.id}
-                          className="member-row"
-                          style={{ cursor: 'pointer' }}
+                          style={{
+                            ...styles.memberRow,
+                            cursor: 'pointer',
+                          }}
                           onClick={() => {
                             setSelectedNewMember(u);
                             setMemberSearch('');
                           }}
                         >
-                          <div className="member-row__identity">
+                          <div style={styles.memberIdentity}>
                             <div className="avatar avatar--small">
                               {u.fullName.slice(0, 2).toUpperCase()}
                             </div>
-                            <div>
-                              <strong>{u.fullName}</strong>
-                              <span>{u.email}</span>
+                            <div style={styles.memberIdentityText}>
+                              <span style={styles.memberName}>
+                                {u.fullName}
+                              </span>
+                              <span style={styles.memberSub}>{u.email}</span>
                             </div>
                           </div>
                         </div>
@@ -1447,27 +1842,44 @@ export function GroupManagementPage() {
                 )}
 
                 {selectedNewMember && (
-                  <Card style={{ marginTop: 8, padding: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Card style={styles.selectedCard}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                      }}
+                    >
                       <div className="avatar avatar--small">
                         {selectedNewMember.fullName
                           .slice(0, 2)
                           .toUpperCase()}
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <strong>{selectedNewMember.fullName}</strong>
-                        <p className="muted">{selectedNewMember.email}</p>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <strong style={{ fontSize: '0.9rem' }}>
+                          {selectedNewMember.fullName}
+                        </strong>
+                        <p
+                          style={{
+                            fontSize: '0.78rem',
+                            color: 'var(--muted)',
+                          }}
+                        >
+                          {selectedNewMember.email}
+                        </p>
                       </div>
                     </div>
                     <div
                       style={{
                         display: 'flex',
                         gap: 8,
-                        marginTop: 10,
+                        marginTop: 12,
+                        flexWrap: 'wrap',
                       }}
                     >
                       <Button
                         variant="primary"
+                        size="sm"
                         leadingIcon={<UserPlus size={14} />}
                         loading={busy}
                         onClick={() => void handleAddMember()}
@@ -1476,6 +1888,7 @@ export function GroupManagementPage() {
                       </Button>
                       <Button
                         variant="ghost"
+                        size="sm"
                         onClick={() => {
                           setSelectedNewMember(null);
                           setMemberSearch('');
@@ -1489,21 +1902,19 @@ export function GroupManagementPage() {
               </Card>
 
               {/* Member list */}
-              <Card>
-                <div className="table-header">
-                  <h2>
-                    Members{' '}
-                    <span className="muted">({members.length})</span>
-                  </h2>
+              <Card style={{ padding: 18 }}>
+                {renderSectionHeader(
+                  `Members (${members.length})`,
+                  'All current group members.',
                   <Button
                     variant="ghost"
+                    size="sm"
                     leadingIcon={<Share2 size={14} />}
                     onClick={() => void handleShareInvite()}
-                    size="sm"
                   >
                     Share invite
-                  </Button>
-                </div>
+                  </Button>,
+                )}
 
                 {members.length === 0 ? (
                   <EmptyState
@@ -1511,60 +1922,47 @@ export function GroupManagementPage() {
                     description="Add members using the search above or share the invite link."
                   />
                 ) : (
-                  <div className="member-table">
+                  <div style={{ display: 'grid', gap: 8 }}>
                     {members.map((member) => {
                       const isRep = currentReps.includes(member.id);
                       const isYou = member.id === userId;
                       return (
-                        <div key={member.id} className="member-row">
-                          <div className="member-row__identity">
+                        <div key={member.id} style={styles.memberRow}>
+                          <div style={styles.memberIdentity}>
                             <div className="avatar avatar--small">
                               {member.name.slice(0, 2).toUpperCase()}
                             </div>
-                            <div>
-                              <strong>
+                            <div style={styles.memberIdentityText}>
+                              <span style={styles.memberName}>
                                 {member.name}
                                 {isYou && (
-                                  <Badge
-                                    tone="success"
-                                    style={{ marginLeft: 6 }}
-                                  >
-                                    You
+                                  <Badge tone="success">You</Badge>
+                                )}
+                                {isRep && (
+                                  <Badge tone="warning">
+                                    <Crown
+                                      size={10}
+                                      style={{ marginRight: 3 }}
+                                    />
+                                    Rep
                                   </Badge>
                                 )}
-                              </strong>
-                              <span>Joined {member.joinedAt}</span>
+                              </span>
+                              <span style={styles.memberSub}>
+                                Joined {member.joinedAt}
+                              </span>
                             </div>
                           </div>
 
-                          <Badge
-                            tone={
-                              member.role === 'Course Rep'
-                                ? 'warning'
-                                : member.role === 'Group Rep'
-                                ? 'success'
-                                : 'neutral'
-                            }
-                          >
-                            {member.role}
-                          </Badge>
-
-                          <div
-                            style={{
-                              display: 'flex',
-                              gap: 6,
-                              flexWrap: 'wrap',
-                            }}
-                          >
+                          <div style={styles.memberActions}>
                             {!isRep && (
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 leadingIcon={<Crown size={14} />}
-                                onClick={() => {
-                                  setSelectedRepCandidate(member);
-                                  void handleAssignRep();
-                                }}
+                                onClick={() =>
+                                  void handleAssignRep(member)
+                                }
                                 disabled={busy}
                               >
                                 Make rep
@@ -1592,7 +1990,9 @@ export function GroupManagementPage() {
                                   void handleRemoveMember(member.id)
                                 }
                                 disabled={busy}
-                                style={{ color: 'var(--color-danger)' }}
+                                style={{
+                                  color: 'var(--error, #EF4444)',
+                                }}
                               >
                                 Remove
                               </Button>
@@ -1605,27 +2005,13 @@ export function GroupManagementPage() {
                 )}
               </Card>
 
-              {/* Assign rep section */}
+              {/* Assign rep */}
               {repCandidates.length > 0 && (
-                <Card>
-                  <div className="table-header">
-                    <div>
-                      <h2>
-                        <Crown
-                          size={16}
-                          style={{
-                            display: 'inline',
-                            marginRight: 6,
-                            verticalAlign: 'middle',
-                          }}
-                        />
-                        Assign group rep
-                      </h2>
-                      <p className="muted">
-                        Promote an existing member to group rep.
-                      </p>
-                    </div>
-                  </div>
+                <Card style={{ padding: 18 }}>
+                  {renderSectionHeader(
+                    'Assign group rep',
+                    'Promote an existing member to group rep.',
+                  )}
 
                   <Input
                     label="Search members"
@@ -1638,32 +2024,41 @@ export function GroupManagementPage() {
                   />
 
                   {repSearch && !selectedRepCandidate && (
-                    <div
-                      className="member-table member-table--dense"
-                      style={{ marginTop: 8, maxHeight: 200, overflowY: 'auto' }}
-                    >
+                    <div style={styles.searchResults}>
                       {repCandidates.length === 0 ? (
-                        <p className="muted" style={{ padding: 12 }}>
+                        <p
+                          style={{
+                            color: 'var(--muted)',
+                            fontSize: '0.86rem',
+                            padding: 12,
+                          }}
+                        >
                           No candidates found.
                         </p>
                       ) : (
                         repCandidates.map((m) => (
                           <div
                             key={m.id}
-                            className="member-row"
-                            style={{ cursor: 'pointer' }}
+                            style={{
+                              ...styles.memberRow,
+                              cursor: 'pointer',
+                            }}
                             onClick={() => {
                               setSelectedRepCandidate(m);
                               setRepSearch('');
                             }}
                           >
-                            <div className="member-row__identity">
+                            <div style={styles.memberIdentity}>
                               <div className="avatar avatar--small">
                                 {m.name.slice(0, 2).toUpperCase()}
                               </div>
-                              <div>
-                                <strong>{m.name}</strong>
-                                <span>{m.joinedAt}</span>
+                              <div style={styles.memberIdentityText}>
+                                <span style={styles.memberName}>
+                                  {m.name}
+                                </span>
+                                <span style={styles.memberSub}>
+                                  {m.joinedAt}
+                                </span>
                               </div>
                             </div>
                           </div>
@@ -1673,17 +2068,21 @@ export function GroupManagementPage() {
                   )}
 
                   {selectedRepCandidate && (
-                    <Card style={{ marginTop: 8, padding: 12 }}>
-                      <strong>{selectedRepCandidate.name}</strong>
+                    <Card style={styles.selectedCard}>
+                      <strong style={{ fontSize: '0.9rem' }}>
+                        {selectedRepCandidate.name}
+                      </strong>
                       <div
                         style={{
                           display: 'flex',
                           gap: 8,
-                          marginTop: 8,
+                          marginTop: 12,
+                          flexWrap: 'wrap',
                         }}
                       >
                         <Button
                           variant="primary"
+                          size="sm"
                           leadingIcon={<Crown size={14} />}
                           loading={busy}
                           onClick={() => void handleAssignRep()}
@@ -1692,6 +2091,7 @@ export function GroupManagementPage() {
                         </Button>
                         <Button
                           variant="ghost"
+                          size="sm"
                           onClick={() => {
                             setSelectedRepCandidate(null);
                             setRepSearch('');
@@ -1707,52 +2107,38 @@ export function GroupManagementPage() {
             </div>
           )}
 
-          {/* ══ CHAT ══════════════════════════════════════════════════════ */}
+          {/* ══ CHAT ═══════════════════════════════════════════════════ */}
           {section === 'chat' && (
-            <Card>
-              <div className="table-header">
-                <div>
-                  <h2>Chat management</h2>
-                  <p className="muted">
-                    {chatEnabled ? 'Chat is active.' : 'Chat is disabled.'}
-                    {' '}{chatMessages.length} message
-                    {chatMessages.length !== 1 ? 's' : ''}.
-                  </p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+            <Card style={{ padding: 18 }}>
+              {renderSectionHeader(
+                'Chat management',
+                `${chatEnabled ? 'Chat is active.' : 'Chat is disabled.'} ${chatMessages.length} ${chatMessages.length === 1 ? 'message' : 'messages'}.`,
+                <>
                   <Button
                     variant={chatEnabled ? 'secondary' : 'primary'}
-                    leadingIcon={<Power size={16} />}
+                    size="sm"
+                    leadingIcon={<Power size={14} />}
                     onClick={() => void handleToggleChat()}
                     loading={busy}
                   >
-                    {chatEnabled ? 'Disable chat' : 'Enable chat'}
+                    {chatEnabled ? 'Disable' : 'Enable'}
                   </Button>
                   {chatMessages.length > 0 && (
                     <Button
                       variant="ghost"
-                      leadingIcon={<Trash2 size={16} />}
+                      size="sm"
+                      leadingIcon={<Trash2 size={14} />}
                       loading={busy}
                       onClick={() => void handleClearChat()}
-                      style={{ color: 'var(--color-danger)' }}
+                      style={{ color: 'var(--error, #EF4444)' }}
                     >
                       Clear all
                     </Button>
                   )}
-                </div>
-              </div>
+                </>,
+              )}
 
-              {/* Messages */}
-              <div
-                className="chat-panel__history"
-                style={{
-                  marginTop: 16,
-                  maxHeight: 400,
-                  overflowY: 'auto',
-                  display: 'grid',
-                  gap: 4,
-                }}
-              >
+              <div style={styles.chatBox}>
                 {chatMessages.length === 0 ? (
                   <EmptyState
                     title="No messages yet"
@@ -1773,7 +2159,13 @@ export function GroupManagementPage() {
                         onClick={() =>
                           void handleDeleteMessage(message.id)
                         }
-                        style={{ position: 'absolute', top: 4, right: 4 }}
+                        style={{
+                          position: 'absolute',
+                          top: 4,
+                          right: 4,
+                          color: 'var(--error, #EF4444)',
+                        }}
+                        aria-label="Delete message"
                       />
                     </div>
                   ))
@@ -1783,60 +2175,47 @@ export function GroupManagementPage() {
             </Card>
           )}
 
-          {/* ══ ANNOUNCEMENTS ═════════════════════════════════════════════ */}
+          {/* ══ ANNOUNCEMENTS ═════════════════════════════════════════ */}
           {section === 'announcements' && (
-            <div style={{ display: 'grid', gap: 16 }}>
-              {/* Compose announcement */}
-              <Card>
-                <div className="table-header">
-                  <div>
-                    <h2>Send announcement</h2>
-                    <p className="muted">
-                      Publish a notification to all group members.
-                    </p>
-                  </div>
-                </div>
+            <div style={{ display: 'grid', gap: 14 }}>
+              <Card style={{ padding: 18 }}>
+                {renderSectionHeader(
+                  'Send announcement',
+                  'Publish a notification to all group members.',
+                )}
 
-                <div style={{ display: 'grid', gap: 10 }}>
+                <div style={{ display: 'grid', gap: 12 }}>
                   <Input
                     label="Title (optional)"
                     placeholder="Announcement title"
                     value={announcementTitle}
-                    onChange={(e) =>
-                      setAnnouncementTitle(e.target.value)
-                    }
+                    onChange={(e) => setAnnouncementTitle(e.target.value)}
                   />
                   <Textarea
                     label="Message"
                     placeholder="Write your announcement…"
                     value={announcementText}
-                    onChange={(e) =>
-                      setAnnouncementText(e.target.value)
-                    }
+                    onChange={(e) => setAnnouncementText(e.target.value)}
                     rows={3}
                   />
                   <Button
                     variant="primary"
-                    leadingIcon={<Send size={16} />}
+                    leadingIcon={<Send size={14} />}
                     loading={sendingAnnouncement}
                     disabled={!announcementText.trim()}
                     onClick={() => void handleSendAnnouncement()}
+                    fullWidth={isMobile}
                   >
                     Send to all members
                   </Button>
                 </div>
               </Card>
 
-              {/* Announcement list */}
-              <Card>
-                <div className="table-header">
-                  <h2>
-                    Published{' '}
-                    <span className="muted">
-                      ({announcements.length})
-                    </span>
-                  </h2>
-                </div>
+              <Card style={{ padding: 18 }}>
+                {renderSectionHeader(
+                  `Published (${announcements.length})`,
+                  'Past announcements sent to this group.',
+                )}
 
                 {announcements.length === 0 ? (
                   <EmptyState
@@ -1844,32 +2223,65 @@ export function GroupManagementPage() {
                     description="Publish the first announcement above."
                   />
                 ) : (
-                  <div className="announcement-list">
+                  <div style={{ display: 'grid', gap: 10 }}>
                     {announcements.map((a) => (
                       <Card
                         key={a.id}
-                        style={{ position: 'relative' }}
+                        style={{
+                          padding: 14,
+                          position: 'relative',
+                        }}
                       >
-                        <strong>{a.title}</strong>
-                        <p className="muted">{a.body}</p>
-                        <span className="muted">
-                          {a.author} ·{' '}
-                          {timeAgo(a.date) || a.date}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          leadingIcon={<Trash2 size={12} />}
-                          onClick={() =>
-                            void handleDeleteAnnouncement(a.id)
-                          }
+                        <div
                           style={{
-                            position: 'absolute',
-                            top: 8,
-                            right: 8,
-                            color: 'var(--color-danger)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 10,
                           }}
-                        />
+                        >
+                          <div
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              display: 'grid',
+                              gap: 4,
+                            }}
+                          >
+                            <strong style={{ fontSize: '0.92rem' }}>
+                              {a.title}
+                            </strong>
+                            <p
+                              style={{
+                                fontSize: '0.84rem',
+                                color: 'var(--muted)',
+                                lineHeight: 1.55,
+                              }}
+                            >
+                              {a.body}
+                            </p>
+                            <span
+                              style={{
+                                fontSize: '0.74rem',
+                                color: 'var(--text-tertiary)',
+                              }}
+                            >
+                              {a.author} · {timeAgo(a.date) || a.date}
+                            </span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            leadingIcon={<Trash2 size={12} />}
+                            onClick={() =>
+                              void handleDeleteAnnouncement(a.id)
+                            }
+                            style={{
+                              color: 'var(--error, #EF4444)',
+                              flexShrink: 0,
+                            }}
+                            aria-label="Delete announcement"
+                          />
+                        </div>
                       </Card>
                     ))}
                   </div>
@@ -1878,51 +2290,46 @@ export function GroupManagementPage() {
             </div>
           )}
 
-          {/* ══ SETTINGS ══════════════════════════════════════════════════ */}
+          {/* ══ SETTINGS ═══════════════════════════════════════════════ */}
           {section === 'settings' && (
-            <div style={{ display: 'grid', gap: 16 }}>
-              {/* Group info */}
-              <Card>
-                <div className="table-header">
-                  <h2>Group information</h2>
-                </div>
-                <div className="member-table">
-                  <div className="member-row">
-                    <div>
-                      <strong>Course code</strong>
-                      <p className="muted">{group.courseCode}</p>
+            <div style={{ display: 'grid', gap: 14 }}>
+              {/* Info */}
+              <Card style={{ padding: 18 }}>
+                {renderSectionHeader('Group information', 'Read-only details.')}
+
+                <div>
+                  <div style={styles.infoRow}>
+                    <div style={styles.infoLabel}>
+                      <span style={styles.infoTitle}>Course code</span>
+                      <span style={styles.infoDesc}>{group.courseCode}</span>
                     </div>
                     <Badge tone="info">{group.level}</Badge>
                   </div>
-                  <div className="member-row">
-                    <div>
-                      <strong>Members</strong>
-                      <p className="muted">
-                        {members.length} member
-                        {members.length !== 1 ? 's' : ''}
-                      </p>
+                  <div style={styles.infoRow}>
+                    <div style={styles.infoLabel}>
+                      <span style={styles.infoTitle}>Members</span>
+                      <span style={styles.infoDesc}>
+                        {members.length} {members.length === 1 ? 'member' : 'members'}
+                      </span>
                     </div>
                     <Button
                       variant="ghost"
-                      leadingIcon={<Users size={16} />}
+                      size="sm"
+                      leadingIcon={<Users size={14} />}
                       onClick={() => setSection('members')}
                     >
                       Manage
                     </Button>
                   </div>
-                  <div className="member-row">
-                    <div>
-                      <strong>Group reps</strong>
-                      <p className="muted">
-                        {currentReps.length} rep
-                        {currentReps.length !== 1 ? 's' : ''}
-                      </p>
+                  <div style={styles.infoRowLast}>
+                    <div style={styles.infoLabel}>
+                      <span style={styles.infoTitle}>Group reps</span>
+                      <span style={styles.infoDesc}>
+                        {currentReps.length} {currentReps.length === 1 ? 'rep' : 'reps'}
+                      </span>
                     </div>
                     <Badge tone="warning">
-                      <Crown
-                        size={12}
-                        style={{ marginRight: 4 }}
-                      />
+                      <Crown size={11} style={{ marginRight: 4 }} />
                       {currentReps.length}
                     </Badge>
                   </div>
@@ -1930,21 +2337,23 @@ export function GroupManagementPage() {
               </Card>
 
               {/* Toggles */}
-              <Card>
-                <div className="table-header">
-                  <h2>Visibility & chat</h2>
-                </div>
-                <div className="member-table">
-                  <div className="member-row">
-                    <div>
-                      <strong>Public listing</strong>
-                      <p className="muted">
-                        When on, this group appears in the group
-                        browser.
-                      </p>
+              <Card style={{ padding: 18 }}>
+                {renderSectionHeader(
+                  'Visibility & chat',
+                  'Control public listing and chat behavior.',
+                )}
+
+                <div>
+                  <div style={styles.infoRow}>
+                    <div style={styles.infoLabel}>
+                      <span style={styles.infoTitle}>Public listing</span>
+                      <span style={styles.infoDesc}>
+                        When on, this group appears in the group browser.
+                      </span>
                     </div>
                     <Button
                       variant={groupPublic ? 'secondary' : 'primary'}
+                      size="sm"
                       loading={busy}
                       onClick={async () => {
                         const next = !groupPublic;
@@ -1955,15 +2364,16 @@ export function GroupManagementPage() {
                       {groupPublic ? 'Turn off' : 'Turn on'}
                     </Button>
                   </div>
-                  <div className="member-row">
-                    <div>
-                      <strong>Group chat</strong>
-                      <p className="muted">
+                  <div style={styles.infoRowLast}>
+                    <div style={styles.infoLabel}>
+                      <span style={styles.infoTitle}>Group chat</span>
+                      <span style={styles.infoDesc}>
                         Allow members to send messages.
-                      </p>
+                      </span>
                     </div>
                     <Button
                       variant={chatEnabled ? 'secondary' : 'primary'}
+                      size="sm"
                       loading={busy}
                       onClick={async () => {
                         const next = !chatEnabled;
@@ -1978,50 +2388,34 @@ export function GroupManagementPage() {
               </Card>
 
               {/* Security */}
-              <Card>
-                <div className="table-header">
-                  <div>
-                    <h2>
-                      <Shield
-                        size={16}
-                        style={{
-                          display: 'inline',
-                          marginRight: 6,
-                          verticalAlign: 'middle',
-                        }}
-                      />
-                      Security
-                    </h2>
-                    <p className="muted">
-                      Password protection for this group.
-                    </p>
-                  </div>
-                </div>
+              <Card style={{ padding: 18 }}>
+                {renderSectionHeader(
+                  'Security',
+                  'Password protection for this group.',
+                )}
 
-                <div className="member-table">
-                  <div className="member-row">
-                    <div>
-                      <strong>Password</strong>
-                      <p className="muted">
-                        {hasPassword
-                          ? 'Password is set. Members need it to join.'
-                          : 'No password. Anyone can join freely.'}
-                      </p>
-                    </div>
-                    <Badge tone={hasPassword ? 'success' : 'neutral'}>
-                      {hasPassword ? (
-                        <>
-                          <Lock size={12} style={{ marginRight: 4 }} />
-                          Protected
-                        </>
-                      ) : (
-                        <>
-                          <Unlock size={12} style={{ marginRight: 4 }} />
-                          Open
-                        </>
-                      )}
-                    </Badge>
+                <div style={styles.infoRow}>
+                  <div style={styles.infoLabel}>
+                    <span style={styles.infoTitle}>Password</span>
+                    <span style={styles.infoDesc}>
+                      {hasPassword
+                        ? 'Password is set. Members need it to join.'
+                        : 'No password. Anyone can join freely.'}
+                    </span>
                   </div>
+                  <Badge tone={hasPassword ? 'success' : 'neutral'}>
+                    {hasPassword ? (
+                      <>
+                        <Lock size={11} style={{ marginRight: 4 }} />
+                        Protected
+                      </>
+                    ) : (
+                      <>
+                        <Unlock size={11} style={{ marginRight: 4 }} />
+                        Open
+                      </>
+                    )}
+                  </Badge>
                 </div>
 
                 <div
@@ -2029,11 +2423,12 @@ export function GroupManagementPage() {
                     display: 'flex',
                     gap: 8,
                     flexWrap: 'wrap',
-                    marginTop: 12,
+                    marginTop: 14,
                   }}
                 >
                   <Button
                     variant="secondary"
+                    size="sm"
                     leadingIcon={<Lock size={14} />}
                     onClick={() => {
                       setPasswordAction('set');
@@ -2048,6 +2443,7 @@ export function GroupManagementPage() {
                     <>
                       <Button
                         variant="ghost"
+                        size="sm"
                         leadingIcon={<Shield size={14} />}
                         onClick={() => {
                           setPasswordAction('verify');
@@ -2055,15 +2451,16 @@ export function GroupManagementPage() {
                           setPasswordModalOpen(true);
                         }}
                       >
-                        Verify password
+                        Verify
                       </Button>
                       <Button
                         variant="ghost"
+                        size="sm"
                         leadingIcon={<Unlock size={14} />}
                         onClick={() => void handleRemovePassword()}
-                        style={{ color: 'var(--color-danger)' }}
+                        style={{ color: 'var(--error, #EF4444)' }}
                       >
-                        Remove password
+                        Remove
                       </Button>
                     </>
                   )}
@@ -2074,7 +2471,7 @@ export function GroupManagementPage() {
         </div>
       </div>
 
-      {/* ══ CLASS FORM MODAL ══════════════════════════════════════════════ */}
+      {/* ══ CLASS FORM MODAL ════════════════════════════════════════════ */}
       <Modal
         open={classFormOpen}
         title={editingClassId ? 'Edit class' : 'Add class'}
@@ -2085,7 +2482,15 @@ export function GroupManagementPage() {
           setClassFormData(EMPTY_CLASS_FORM);
         }}
         footer={
-          <div className="modal-actions">
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
+              width: '100%',
+              justifyContent: 'flex-end',
+            }}
+          >
             <Button
               variant="ghost"
               onClick={() => {
@@ -2117,10 +2522,7 @@ export function GroupManagementPage() {
             placeholder="e.g. Introduction to Programming"
             value={classFormData.className}
             onChange={(e) =>
-              setClassFormData((f) => ({
-                ...f,
-                className: e.target.value,
-              }))
+              setClassFormData((f) => ({ ...f, className: e.target.value }))
             }
           />
           <Input
@@ -2128,20 +2530,14 @@ export function GroupManagementPage() {
             placeholder="e.g. CS101"
             value={classFormData.courseCode}
             onChange={(e) =>
-              setClassFormData((f) => ({
-                ...f,
-                courseCode: e.target.value,
-              }))
+              setClassFormData((f) => ({ ...f, courseCode: e.target.value }))
             }
           />
           <Select
             label="Day of week"
             value={classFormData.dayOfWeek}
             onChange={(e) =>
-              setClassFormData((f) => ({
-                ...f,
-                dayOfWeek: e.target.value,
-              }))
+              setClassFormData((f) => ({ ...f, dayOfWeek: e.target.value }))
             }
           >
             {DAYS.map((d) => (
@@ -2153,7 +2549,7 @@ export function GroupManagementPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
+              gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
               gap: 12,
             }}
           >
@@ -2185,10 +2581,7 @@ export function GroupManagementPage() {
             placeholder="e.g. Room 204, Block A"
             value={classFormData.venue}
             onChange={(e) =>
-              setClassFormData((f) => ({
-                ...f,
-                venue: e.target.value,
-              }))
+              setClassFormData((f) => ({ ...f, venue: e.target.value }))
             }
           />
           <Input
@@ -2196,10 +2589,7 @@ export function GroupManagementPage() {
             placeholder="e.g. Science Block"
             value={classFormData.building}
             onChange={(e) =>
-              setClassFormData((f) => ({
-                ...f,
-                building: e.target.value,
-              }))
+              setClassFormData((f) => ({ ...f, building: e.target.value }))
             }
           />
           <Input
@@ -2216,7 +2606,7 @@ export function GroupManagementPage() {
         </div>
       </Modal>
 
-      {/* ══ PASSWORD MODAL ════════════════════════════════════════════════ */}
+      {/* ══ PASSWORD MODAL ═════════════════════════════════════════════ */}
       <Modal
         open={passwordModalOpen}
         title={
@@ -2237,7 +2627,15 @@ export function GroupManagementPage() {
           setPasswordConfirm('');
         }}
         footer={
-          <div className="modal-actions">
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
+              width: '100%',
+              justifyContent: 'flex-end',
+            }}
+          >
             <Button
               variant="ghost"
               onClick={() => {
@@ -2261,9 +2659,7 @@ export function GroupManagementPage() {
       >
         <div style={{ display: 'grid', gap: 12 }}>
           <Input
-            label={
-              passwordAction === 'set' ? 'New password' : 'Password'
-            }
+            label={passwordAction === 'set' ? 'New password' : 'Password'}
             type="password"
             placeholder="Enter password"
             value={passwordInput}

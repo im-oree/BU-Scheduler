@@ -1489,6 +1489,7 @@ export function HomePage() {
 
       <div style={{ maxWidth: '100%', overflowX: 'hidden' }}>
         <PageFrame
+          id="home-page-frame"
           eyebrow="Dashboard"
           title="Welcome back"
           description="Here's what's happening with your classes and groups today."

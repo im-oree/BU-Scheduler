@@ -345,6 +345,7 @@ export function ProfilePage() {
   // ── Render ────────────────────────────────────────────────
   return (
     <PageFrame
+      id="profile-page-frame"
       eyebrow="Profile"
       title="Account settings"
       description="Edit profile details, notification preferences, and account actions from one place."

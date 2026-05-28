@@ -786,7 +786,7 @@ export function NotificationsPage() {
 
   if (loading) {
     return (
-      <PageFrame eyebrow="Activity" title="Notifications">
+      <PageFrame id="notifications-page-frame" eyebrow="Activity" title="Notifications">
         <div
           style={{
             display: 'flex',

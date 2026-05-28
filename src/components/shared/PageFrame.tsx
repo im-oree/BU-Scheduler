@@ -5,6 +5,7 @@ interface PageFrameProps {
   title: string;
   description?: string;
   action?: ReactNode;
+  id?: string;
   children: ReactNode;
 }
 
@@ -13,10 +14,11 @@ export function PageFrame({
   title,
   description,
   action,
+  id,
   children,
 }: PageFrameProps) {
   return (
-    <div className="page">
+    <div className="page" id={id}>
       <div className="page__header">
         <div>
           {eyebrow ? (
