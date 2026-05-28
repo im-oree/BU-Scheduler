@@ -504,11 +504,11 @@ export function ProfilePage() {
         {tab === 'account' && (
           <div className="tool-list">
             <div className="tool-list__item">
-              <strong>Linked account</strong>
+              <strong>Linked account PLACEHOLDER</strong>
               <span>{profile?.email ?? '—'}</span>
             </div>
             <div className="tool-list__item">
-              <strong>My groups</strong>
+              <strong>My groups PLACEHOLDER</strong>
               <span>
                 <Button
                   variant="ghost"
@@ -519,7 +519,7 @@ export function ProfilePage() {
               </span>
             </div>
             <div className="tool-list__item">
-              <strong>Delete account</strong>
+              <strong>Delete account PLACEHOLDER</strong>
               <span>Destructive action with confirmation.</span>
             </div>
           </div>

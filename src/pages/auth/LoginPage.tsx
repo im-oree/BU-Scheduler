@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, type FormEvent } from 'react';
+import { LoadingScreen } from '../../components/LoadingScreen';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button, Card, Input } from '../../components/ui';
@@ -108,12 +109,7 @@ export function LoginPage() {
 
   // Loading state
   if (authStatus === 'loading') {
-    return (
-      <div className="loading-screen" aria-live="polite" aria-busy="true">
-        <div className="spinner" />
-        <p>Checking your session…</p>
-      </div>
-    );
+    return <LoadingScreen message="Checking your session…" />;
   }
 
   return (

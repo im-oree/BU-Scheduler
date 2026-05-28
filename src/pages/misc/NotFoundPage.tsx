@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { Button, Card } from '../../components/ui';
 
 export function NotFoundPage() {
@@ -8,12 +9,16 @@ export function NotFoundPage() {
         <h1>Page not found</h1>
         <p className="muted">That route does not exist in this build.</p>
         <div className="stack stack--large">
-          <Button variant="primary" size="lg">
-            Go home
-          </Button>
-          <Button variant="ghost" size="lg">
-            Browse groups
-          </Button>
+          <Link to="/home" style={{ textDecoration: 'none' }}>
+            <Button variant="primary" size="lg" fullWidth>
+              Go home
+            </Button>
+          </Link>
+          <Link to="/groups" style={{ textDecoration: 'none' }}>
+            <Button variant="ghost" size="lg" fullWidth>
+              Browse groups
+            </Button>
+          </Link>
         </div>
       </Card>
     </div>

@@ -18,6 +18,7 @@ import {
 import {
   Bell,
   CalendarDays,
+  LogOut,
   MessageSquare,
   Plus,
   RefreshCw,

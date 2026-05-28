@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter as Router, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AppShell } from './components/Layout';
+import { LoadingScreen } from './components/LoadingScreen';
 import { normalizeReturnTo } from './lib/auth';
 import { useAuthStore } from './store/useAuthStore';
 import './app.css';
@@ -37,15 +38,9 @@ const ProfilePage = lazyNamedPage('ProfilePage');
 const NotificationsPage = lazyNamedPage('NotificationsPage');
 const NotFoundPage = lazyNamedPage('NotFoundPage');
 const HelpPage = lazyNamedPage('ProfilePage');
+const SignOutPage = lazyNamedPage('SignOutPage');
 
-function LoadingScreen() {
-  return (
-    <div className="loading-screen" aria-live="polite" aria-busy="true">
-      <div className="spinner" />
-      <p>Loading BU Scheduler…</p>
-    </div>
-  );
-}
+
 
 function AuthBootstrap() {
   const bootstrap = useAuthStore((state) => state.bootstrap);
@@ -156,6 +151,7 @@ export default function RootApp() {
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/settings" element={<ProfilePage />} />
                 <Route path="/help" element={<HelpPage />} />
+                <Route path="/sign-out" element={<SignOutPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
                 <Route path="/activity" element={<NotificationsPage />} />
                 <Route path="/import" element={<BulkImportPage />} />

@@ -7,8 +7,10 @@ import {
   type Auth,
   type User,
 } from 'firebase/auth';
+import { getFirestore, enableIndexedDbPersistence, enableMultiTabIndexedDbPersistence, type Firestore } from 'firebase/firestore';
 
 let app: FirebaseApp | null = null;
+let firestore: Firestore | null = null;
 
 export function initFirebase() {
   if (app) return app;
@@ -36,11 +38,34 @@ export function initFirebase() {
   }
 
   app = initializeApp(options);
+
+  try {
+    firestore = getFirestore(app);
+    void enableMultiTabIndexedDbPersistence(firestore).catch(async () => {
+      try {
+        await enableIndexedDbPersistence(firestore as Firestore);
+      } catch {
+        // Persistence is best-effort. The app still works without it.
+      }
+    });
+  } catch {
+    firestore = null;
+  }
+
   return app;
 }
 
 export function getFirebaseApp() {
   return initFirebase();
+}
+
+export function getFirebaseDb() {
+  if (!firestore) {
+    if (!app) initFirebase();
+    firestore = getFirestore(getFirebaseApp());
+  }
+
+  return firestore;
 }
 
 function ensureAuth() {

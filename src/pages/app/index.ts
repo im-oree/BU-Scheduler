@@ -11,3 +11,4 @@ export { MembersPage } from './MembersPage';
 export { ChatPage } from './ChatPage';
 export { ProfilePage } from './ProfilePage';
 export { NotificationsPage } from './NotificationsPage';
+export { SignOutPage } from './SignOutPage';

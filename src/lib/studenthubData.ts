@@ -15,7 +15,8 @@ import {
   where,
   addDoc,
 } from 'firebase/firestore';
-import { getFirebaseApp } from './firebase';
+import { getFirebaseDb } from './firebase';
+import { withCachedValue } from './offlineCache';
 
 export type StudentHubGroup = {
   id: string;
@@ -119,8 +120,11 @@ export type GroupChatRoleFlags = {
 // ---------------------------------------------------------------------------
 
 function db() {
-  const app = getFirebaseApp();
-  return getFirestore(app);
+  return getFirebaseDb();
+}
+
+function cacheKey(...parts: string[]) {
+  return ['studenthub', ...parts].join(':');
 }
 
 function asText(value: unknown, fallback = '') {
@@ -367,28 +371,33 @@ function extractStructuredTimetableEntries(
 // ---------------------------------------------------------------------------
 
 export async function fetchCurrentUserProfile(userId: string) {
-  // Correct path: users/{firebaseUid} — unchanged, was already right.
-  const snapshot = await getDoc(doc(db(), 'users', userId));
-  if (!snapshot.exists()) return null;
+  return withCachedValue({
+    key: cacheKey('profile', userId),
+    fallback: null,
+    loader: async () => {
+      const snapshot = await getDoc(doc(db(), 'users', userId));
+      if (!snapshot.exists()) return null;
 
-  const data = snapshot.data() as Record<string, unknown>;
-  return {
-    ...mapProfile(data),
-    role: asText(data.role, ''),
-    courseAdmins: asArray<string>(data.courseAdmins),
-    levelCourseReps: asArray(data.levelCourseReps),
-    levelGroupReps: asArray(data.levelGroupReps),
-    groupReps: asArray<string>(data.groupReps),
-    courseReps: asArray<string>(data.courseReps),
-    course: asText(data.course, ''),
-    level: asText(data.level, ''),
-    studyLevel: asText(data.studyLevel, ''),
-    groupMemberships: asArray(data.groupMemberships).map((entry) => ({
-      groupId: asText((entry as Record<string, unknown>).groupId, ''),
-      joinedAt: asText((entry as Record<string, unknown>).joinedAt, ''),
-      status: asText((entry as Record<string, unknown>).status, 'active'),
-    })).filter((entry) => Boolean(entry.groupId)),
-  };
+      const data = snapshot.data() as Record<string, unknown>;
+      return {
+        ...mapProfile(data),
+        role: asText(data.role, ''),
+        courseAdmins: asArray<string>(data.courseAdmins),
+        levelCourseReps: asArray(data.levelCourseReps),
+        levelGroupReps: asArray(data.levelGroupReps),
+        groupReps: asArray<string>(data.groupReps),
+        courseReps: asArray<string>(data.courseReps),
+        course: asText(data.course, ''),
+        level: asText(data.level, ''),
+        studyLevel: asText(data.studyLevel, ''),
+        groupMemberships: asArray(data.groupMemberships).map((entry) => ({
+          groupId: asText((entry as Record<string, unknown>).groupId, ''),
+          joinedAt: asText((entry as Record<string, unknown>).joinedAt, ''),
+          status: asText((entry as Record<string, unknown>).status, 'active'),
+        })).filter((entry) => Boolean(entry.groupId)),
+      };
+    },
+  });
 }
 
 function getGroupMemberIds(data: Record<string, unknown>): string[] {
@@ -443,39 +452,50 @@ export function getGroupRoleFlags(
 }
 
 export async function fetchAllGroups(): Promise<StudentHubGroup[]> {
-  const [courseGroupSnap, legacyGroupSnap] = await Promise.all([
-    getDocs(query(collection(db(), 'courseGroups'), limit(500))),
-    getDocs(query(collection(db(), 'groups'), limit(500))),
-  ]);
+  return withCachedValue({
+    key: cacheKey('all-groups'),
+    fallback: [],
+    loader: async () => {
+      const [courseGroupSnap, legacyGroupSnap] = await Promise.all([
+        getDocs(query(collection(db(), 'courseGroups'), limit(500))),
+        getDocs(query(collection(db(), 'groups'), limit(500))),
+      ]);
 
-  const groups = new Map<string, Record<string, unknown>>();
-  courseGroupSnap.docs.forEach((docSnap) => {
-    groups.set(docSnap.id, docSnap.data() as Record<string, unknown>);
+      const groups = new Map<string, Record<string, unknown>>();
+      courseGroupSnap.docs.forEach((docSnap) => {
+        groups.set(docSnap.id, docSnap.data() as Record<string, unknown>);
+      });
+      legacyGroupSnap.docs.forEach((docSnap) => {
+        if (!groups.has(docSnap.id)) {
+          groups.set(docSnap.id, docSnap.data() as Record<string, unknown>);
+        }
+      });
+
+      const enriched = await Promise.all(
+        [...groups.entries()].map(async ([id, data]) => ({
+          ...toGroupCard(id, data, await fetchNextGroupClass(id)),
+          memberCount: asNumber(data.memberCount, getGroupMemberIds(data).length),
+          description: asText(data.description, 'Course group'),
+        })),
+      );
+
+      return enriched;
+    },
   });
-  legacyGroupSnap.docs.forEach((docSnap) => {
-    if (!groups.has(docSnap.id)) {
-      groups.set(docSnap.id, docSnap.data() as Record<string, unknown>);
-    }
-  });
-
-  const enriched = await Promise.all(
-    [...groups.entries()].map(async ([id, data]) => ({
-      ...toGroupCard(id, data, await fetchNextGroupClass(id)),
-      // Useful for browser cards and join flow
-      memberCount: asNumber(data.memberCount, getGroupMemberIds(data).length),
-      description: asText(data.description, 'Course group'),
-    })),
-  );
-
-  return enriched;
 }
 
 export async function fetchGroupDocument(groupId: string): Promise<Record<string, unknown> | null> {
-  const courseGroupSnap = await getDoc(doc(db(), 'courseGroups', groupId));
-  if (courseGroupSnap.exists()) return courseGroupSnap.data() as Record<string, unknown>;
-  const groupSnap = await getDoc(doc(db(), 'groups', groupId));
-  if (groupSnap.exists()) return groupSnap.data() as Record<string, unknown>;
-  return null;
+  return withCachedValue({
+    key: cacheKey('group-document', groupId),
+    fallback: null,
+    loader: async () => {
+      const courseGroupSnap = await getDoc(doc(db(), 'courseGroups', groupId));
+      if (courseGroupSnap.exists()) return courseGroupSnap.data() as Record<string, unknown>;
+      const groupSnap = await getDoc(doc(db(), 'groups', groupId));
+      if (groupSnap.exists()) return groupSnap.data() as Record<string, unknown>;
+      return null;
+    },
+  });
 }
 
 export async function joinGroup(groupId: string, profile: StudentHubProfile, userId: string) {
@@ -522,6 +542,63 @@ export async function joinGroup(groupId: string, profile: StudentHubProfile, use
   );
 
   return { alreadyJoined: false };
+}
+
+export async function leaveGroup(groupId: string, userId: string) {
+  const data = await fetchGroupDocument(groupId);
+  if (!data) throw new Error('Group not found');
+
+  // Remove from members array
+  const currentMembers = Array.isArray(data.members)
+    ? (data.members as Array<Record<string, unknown>>)
+    : [];
+
+  const nextMembers = currentMembers.filter(
+    (m) => String(m.userId ?? '') !== userId,
+  );
+
+  // Remove from groupReps if they're a rep
+  const currentReps: string[] = Array.isArray(data.groupReps)
+    ? (data.groupReps as string[])
+    : [];
+  const nextReps = currentReps.filter((id) => id !== userId);
+
+  const groupRef = doc(db(), 'courseGroups', groupId);
+  const legacyRef = doc(db(), 'groups', groupId);
+
+  try {
+    await updateDoc(groupRef, {
+      members: nextMembers,
+      memberCount: nextMembers.length,
+      groupReps: nextReps,
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    await updateDoc(legacyRef, {
+      members: nextMembers,
+      memberCount: nextMembers.length,
+      groupReps: nextReps,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  // Remove from user's groupMemberships
+  const userRef = doc(db(), 'users', userId);
+  const userSnap = await getDoc(userRef);
+  if (userSnap.exists()) {
+    const userMemberships = asArray(
+      userSnap.data().groupMemberships,
+    ) as Array<Record<string, unknown>>;
+    const nextMemberships = userMemberships.filter(
+      (m) => String(m.groupId ?? '') !== groupId,
+    );
+    await updateDoc(userRef, {
+      groupMemberships: nextMemberships,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  return { success: true };
 }
 
 export async function demoteRep(groupId: string, memberId: string) {
@@ -606,77 +683,78 @@ export async function sendGroupChatMessage(params: {
  */
 export async function fetchUserGroups(userId: string): Promise<StudentHubGroup[]> {
   console.log('[studenthubData] fetchUserGroups userId:', userId);
+  return withCachedValue({
+    key: cacheKey('user-groups', userId),
+    fallback: [],
+    loader: async () => {
+      const [courseGroupSnap, groupSnap] = await Promise.all([
+        getDocs(query(collection(db(), 'courseGroups'), limit(500))),
+        getDocs(query(collection(db(), 'groups'), limit(500))),
+      ]);
 
-  try {
-    const [courseGroupSnap, groupSnap] = await Promise.all([
-      getDocs(query(collection(db(), 'courseGroups'), limit(500))),
-      getDocs(query(collection(db(), 'groups'), limit(500))),
-    ]);
+      const isMember = (data: Record<string, unknown>): boolean => {
+        const members = asArray(data.members) as unknown[];
+        return members.some((m) => {
+          if (!m) return false;
+          if (typeof m === 'string') return m === userId;
+          return (m as Record<string, unknown>).userId === userId;
+        });
+      };
 
-    const isMember = (data: Record<string, unknown>): boolean => {
-      const members = asArray(data.members) as unknown[];
-      return members.some((m) => {
-        if (!m) return false;
-        // Legacy path: plain string IDs
-        if (typeof m === 'string') return m === userId;
-        // Current path: member objects with userId field
-        return (m as Record<string, unknown>).userId === userId;
+      const matched: Array<{ id: string; data: Record<string, unknown> }> = [];
+
+      courseGroupSnap.docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        if (isMember(data)) matched.push({ id: d.id, data });
       });
-    };
 
-    const matched: Array<{ id: string; data: Record<string, unknown> }> = [];
+      const courseGroupIds = new Set(matched.map((m) => m.id));
+      groupSnap.docs.forEach((d) => {
+        if (courseGroupIds.has(d.id)) return;
+        const data = d.data() as Record<string, unknown>;
+        if (isMember(data)) matched.push({ id: d.id, data });
+      });
 
-    courseGroupSnap.docs.forEach((d) => {
-      const data = d.data() as Record<string, unknown>;
-      if (isMember(data)) matched.push({ id: d.id, data });
-    });
+      console.log('[studenthubData] matched groups:', matched.length);
 
-    // Only fall back to legacy 'groups' collection when not already covered
-    const courseGroupIds = new Set(matched.map((m) => m.id));
-    groupSnap.docs.forEach((d) => {
-      if (courseGroupIds.has(d.id)) return; // already included above
-      const data = d.data() as Record<string, unknown>;
-      if (isMember(data)) matched.push({ id: d.id, data });
-    });
+      const enriched = await Promise.all(
+        matched.map(async ({ id, data }) => {
+          const nextClass = await fetchNextGroupClass(id);
+          return toGroupCard(id, data, nextClass);
+        }),
+      );
 
-    console.log('[studenthubData] matched groups:', matched.length);
-
-    const enriched = await Promise.all(
-      matched.map(async ({ id, data }) => {
-        const nextClass = await fetchNextGroupClass(id);
-        return toGroupCard(id, data, nextClass);
-      }),
-    );
-
-    return enriched;
-  } catch (err) {
-    console.error('[studenthubData] fetchUserGroups failed:', err);
-    return [];
-  }
+      return enriched;
+    },
+  });
 }
 
 export async function fetchGroupById(groupId: string): Promise<StudentHubGroup | null> {
-  // Primary source: courseGroups
-  const courseGroupSnap = await getDoc(doc(db(), 'courseGroups', groupId));
-  if (courseGroupSnap.exists()) {
-    return toGroupCard(
-      courseGroupSnap.id,
-      courseGroupSnap.data() as Record<string, unknown>,
-      await fetchNextGroupClass(groupId),
-    );
-  }
+  return withCachedValue({
+    key: cacheKey('group-by-id', groupId),
+    fallback: null,
+    loader: async () => {
+      const courseGroupSnap = await getDoc(doc(db(), 'courseGroups', groupId));
+      if (courseGroupSnap.exists()) {
+        return toGroupCard(
+          courseGroupSnap.id,
+          courseGroupSnap.data() as Record<string, unknown>,
+          await fetchNextGroupClass(groupId),
+        );
+      }
 
-  // Legacy fallback
-  const groupSnap = await getDoc(doc(db(), 'groups', groupId));
-  if (groupSnap.exists()) {
-    return toGroupCard(
-      groupSnap.id,
-      groupSnap.data() as Record<string, unknown>,
-      await fetchNextGroupClass(groupId),
-    );
-  }
+      const groupSnap = await getDoc(doc(db(), 'groups', groupId));
+      if (groupSnap.exists()) {
+        return toGroupCard(
+          groupSnap.id,
+          groupSnap.data() as Record<string, unknown>,
+          await fetchNextGroupClass(groupId),
+        );
+      }
 
-  return null;
+      return null;
+    },
+  });
 }
 
 /**
@@ -685,66 +763,71 @@ export async function fetchGroupById(groupId: string): Promise<StudentHubGroup |
  * rep arrays (groupReps, courseReps), not from the user profile.
  */
 export async function fetchGroupMembers(groupId: string): Promise<StudentHubMember[]> {
-  const snap = await getDoc(doc(db(), 'courseGroups', groupId));
-  if (!snap.exists()) return [];
+  return withCachedValue({
+    key: cacheKey('group-members', groupId),
+    fallback: [],
+    loader: async () => {
+      const snap = await getDoc(doc(db(), 'courseGroups', groupId));
+      if (!snap.exists()) return [];
 
-  const data = snap.data() as Record<string, unknown>;
-  const members = asArray(data.members) as unknown[];
-  const groupReps = new Set(asArray<string>(data.groupReps ?? data.levelGroupReps));
-  const courseReps = new Set(asArray<string>(data.courseReps ?? data.levelCourseReps));
+      const data = snap.data() as Record<string, unknown>;
+      const members = asArray(data.members) as unknown[];
+      const groupReps = new Set(asArray<string>(data.groupReps ?? data.levelGroupReps));
+      const courseReps = new Set(asArray<string>(data.courseReps ?? data.levelCourseReps));
 
-  return members
-    .map((m): StudentHubMember | null => {
-      if (!m || typeof m === 'string') return null; // skip legacy plain-string entries
-      const member = m as Record<string, unknown>;
-      const uid = asText(member.userId, '');
-      if (!uid) return null;
+      return members
+        .map((m): StudentHubMember | null => {
+          if (!m || typeof m === 'string') return null;
+          const member = m as Record<string, unknown>;
+          const uid = asText(member.userId, '');
+          if (!uid) return null;
 
-      // FIX: joinedAt comes from the member object, not from the user profile.
-      const rawJoinedAt = toDateString(member.joinedAt);
-      const joinedAt = rawJoinedAt ? rawJoinedAt.slice(0, 10) : asText(member.joinedAt as string, 'Recently');
+          const rawJoinedAt = toDateString(member.joinedAt);
+          const joinedAt = rawJoinedAt ? rawJoinedAt.slice(0, 10) : asText(member.joinedAt as string, 'Recently');
 
-      return {
-        id: uid,
-        name: asText(
-          member.userName ?? member.displayName ?? member.name ?? member.userEmail,
-          uid,
-        ),
-        role: courseReps.has(uid) ? 'Course Rep' : groupReps.has(uid) ? 'Group Rep' : 'Member',
-        joinedAt,
-      };
-    })
-    .filter((item): item is StudentHubMember => item !== null);
+          return {
+            id: uid,
+            name: asText(
+              member.userName ?? member.displayName ?? member.name ?? member.userEmail,
+              uid,
+            ),
+            role: courseReps.has(uid) ? 'Course Rep' : groupReps.has(uid) ? 'Group Rep' : 'Member',
+            joinedAt,
+          };
+        })
+        .filter((item): item is StudentHubMember => item !== null);
+    },
+  });
 }
 
 export async function fetchGroupAnnouncements(groupId: string): Promise<StudentHubAnnouncement[]> {
-  // Path confirmed correct: courseGroups/{groupId}/notifications
-  const snap = await getDocs(
-    query(
-      collection(db(), 'courseGroups', groupId, 'notifications'),
-      orderBy('createdAt', 'desc'),
-      limit(20),
-    ),
-  );
+  return withCachedValue({
+    key: cacheKey('group-announcements', groupId),
+    fallback: [],
+    loader: async () => {
+      const snap = await getDocs(
+        query(
+          collection(db(), 'courseGroups', groupId, 'notifications'),
+          orderBy('createdAt', 'desc'),
+          limit(20),
+        ),
+      );
 
-  return snap.docs.map((item) => {
-    const data = item.data() as Record<string, unknown>;
+      return snap.docs.map((item) => {
+        const data = item.data() as Record<string, unknown>;
+        const body = (data.body ?? data.detail ?? data.message ?? data.text ?? data.content ?? '') as unknown;
+        const bodyStr = typeof body === 'string' ? body : (typeof body === 'object' && body ? JSON.stringify(body) : '');
+        const rawDate = toDateString(data.createdAt) || toDateString(data.timestamp) || asText(data.date, '');
 
-    // Announcement payloads sometimes use different fields across data sources
-    // (body, detail, message, text, content). Prefer the most descriptive
-    // field available and fall back to an empty string.
-    const body = (data.body ?? data.detail ?? data.message ?? data.text ?? data.content ?? '') as unknown;
-    const bodyStr = typeof body === 'string' ? body : (typeof body === 'object' && body ? JSON.stringify(body) : '');
-
-    const rawDate = toDateString(data.createdAt) || toDateString(data.timestamp) || asText(data.date, '');
-
-    return {
-      id: item.id,
-      title: asText(data.title ?? data.subject ?? data.headline, 'Announcement'),
-      body: asText(bodyStr, ''),
-      date: rawDate.slice(0, 10) || asText(data.date, ''),
-      author: asText(data.author ?? data.displayName ?? data.userName ?? 'StudentHub', 'StudentHub'),
-    };
+        return {
+          id: item.id,
+          title: asText(data.title ?? data.subject ?? data.headline, 'Announcement'),
+          body: asText(bodyStr, ''),
+          date: rawDate.slice(0, 10) || asText(data.date, ''),
+          author: asText(data.author ?? data.displayName ?? data.userName ?? 'StudentHub', 'StudentHub'),
+        };
+      });
+    },
   });
 }
 
@@ -787,80 +870,90 @@ export async function createGroupAnnouncement(params: {
  * path returned an empty result even when messages existed.
  */
 export async function fetchGroupChatMessages(groupId: string): Promise<StudentHubChatMessage[]> {
-  const snap = await getDocs(
-    query(
-      collection(db(), 'groupChats', groupId, 'messages'),
-      orderBy('createdAt', 'asc'),
-      limit(100),
-    ),
-  );
+  return withCachedValue({
+    key: cacheKey('group-chat', groupId),
+    fallback: [],
+    loader: async () => {
+      const snap = await getDocs(
+        query(
+          collection(db(), 'groupChats', groupId, 'messages'),
+          orderBy('createdAt', 'asc'),
+          limit(100),
+        ),
+      );
 
-  return snap.docs.map((item) => {
-    const data = item.data() as Record<string, unknown>;
-    const rawTime = toDateString(data.createdAt);
-    const userRoleRaw = isPlainObject(data.userRole) ? (data.userRole as Record<string, unknown>) : null;
-    return {
-      id: item.id,
-      author: asText(
-        data.author ?? data.displayName ?? data.userName ?? data.senderName,
-        'StudentHub',
-      ),
-      role: asText(data.role ?? data.userRole ?? data.senderRole, 'Member'),
-      // Show HH:MM only — full ISO time slice is enough for chat bubbles
-      time: rawTime ? rawTime.slice(11, 16) : asText(data.time as string, '—'),
-      text: asText(data.text ?? data.message ?? data.content, ''),
-      userId: asText(data.userId, ''),
-      userAvatar: asText(data.userAvatar, ''),
-      edited: Boolean(data.edited),
-      deleted: Boolean(data.deleted),
-      reactions: isPlainObject(data.reactions)
-        ? Object.fromEntries(
-            Object.entries(data.reactions).map(([emoji, value]) => [emoji, asArray<string>(value)]),
-          )
-        : undefined,
-      userRole: userRoleRaw
-        ? {
-            isGroupRep: Boolean(userRoleRaw.isGroupRep),
-            isCourseRep: Boolean(userRoleRaw.isCourseRep ?? userRoleRaw.isLevelCourseRep),
-            isCourseAdmin: Boolean(userRoleRaw.isCourseAdmin),
-            isAdmin: Boolean(userRoleRaw.isAdmin ?? userRoleRaw.isSystemAdmin),
-          }
-        : undefined,
-    };
+      return snap.docs.map((item) => {
+        const data = item.data() as Record<string, unknown>;
+        const rawTime = toDateString(data.createdAt);
+        const userRoleRaw = isPlainObject(data.userRole) ? (data.userRole as Record<string, unknown>) : null;
+        return {
+          id: item.id,
+          author: asText(
+            data.author ?? data.displayName ?? data.userName ?? data.senderName,
+            'StudentHub',
+          ),
+          role: asText(data.role ?? data.userRole ?? data.senderRole, 'Member'),
+          time: rawTime ? rawTime.slice(11, 16) : asText(data.time as string, '—'),
+          text: asText(data.text ?? data.message ?? data.content, ''),
+          userId: asText(data.userId, ''),
+          userAvatar: asText(data.userAvatar, ''),
+          edited: Boolean(data.edited),
+          deleted: Boolean(data.deleted),
+          reactions: isPlainObject(data.reactions)
+            ? Object.fromEntries(
+                Object.entries(data.reactions).map(([emoji, value]) => [emoji, asArray<string>(value)]),
+              )
+            : undefined,
+          userRole: userRoleRaw
+            ? {
+                isGroupRep: Boolean(userRoleRaw.isGroupRep),
+                isCourseRep: Boolean(userRoleRaw.isCourseRep ?? userRoleRaw.isLevelCourseRep),
+                isCourseAdmin: Boolean(userRoleRaw.isCourseAdmin),
+                isAdmin: Boolean(userRoleRaw.isAdmin ?? userRoleRaw.isSystemAdmin),
+              }
+            : undefined,
+        };
+      });
+    },
   });
 }
 
 export async function fetchNotifications(userId: string): Promise<StudentHubNotification[]> {
-  const [recipientSnap, userSnap] = await Promise.all([
-    getDocs(
-      query(collection(db(), 'notifications'), where('recipientId', '==', userId), limit(50)),
-    ),
-    getDocs(
-      query(collection(db(), 'notifications'), where('userId', '==', userId), limit(50)),
-    ),
-  ]);
+  return withCachedValue({
+    key: cacheKey('notifications', userId),
+    fallback: [],
+    loader: async () => {
+      const [recipientSnap, userSnap] = await Promise.all([
+        getDocs(
+          query(collection(db(), 'notifications'), where('recipientId', '==', userId), limit(50)),
+        ),
+        getDocs(
+          query(collection(db(), 'notifications'), where('userId', '==', userId), limit(50)),
+        ),
+      ]);
 
-  // Deduplicate by document ID in case both queries return the same doc
-  const seen = new Set<string>();
-  const docs = [...recipientSnap.docs, ...userSnap.docs].filter((d) => {
-    if (seen.has(d.id)) return false;
-    seen.add(d.id);
-    return true;
-  });
+      const seen = new Set<string>();
+      const docs = [...recipientSnap.docs, ...userSnap.docs].filter((d) => {
+        if (seen.has(d.id)) return false;
+        seen.add(d.id);
+        return true;
+      });
 
-  return docs.map((item) => {
-    const data = item.data() as Record<string, unknown>;
-    const time =
-      toDateString(data.createdAt).slice(0, 16) ||
-      toDateString(data.timestamp).slice(0, 16) ||
-      asText(data.time as string, 'Recently');
-    return {
-      id: item.id,
-      title: asText(data.title, 'Notification'),
-      detail: asText(data.body ?? data.detail, ''),
-      time,
-      tone: (asText(data.tone as string, 'info') as StudentHubNotification['tone']) || 'info',
-    };
+      return docs.map((item) => {
+        const data = item.data() as Record<string, unknown>;
+        const time =
+          toDateString(data.createdAt).slice(0, 16) ||
+          toDateString(data.timestamp).slice(0, 16) ||
+          asText(data.time as string, 'Recently');
+        return {
+          id: item.id,
+          title: asText(data.title, 'Notification'),
+          detail: asText(data.body ?? data.detail, ''),
+          time,
+          tone: (asText(data.tone as string, 'info') as StudentHubNotification['tone']) || 'info',
+        };
+      });
+    },
   });
 }
 

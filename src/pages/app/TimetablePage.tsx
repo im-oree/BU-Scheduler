@@ -16,21 +16,22 @@ import {
   Timer,
   Coffee,
   GraduationCap,
-  LayoutGrid,
   List,
   Sun,
-  Bell,
+  Radio,
+  User,
+  Grid3X3,
 } from 'lucide-react';
 import { Badge, Button, Card, Tabs } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
 import { useAuthStore } from '../../store/useAuthStore';
 import { fetchUserTimetableEntries } from '../../lib/studenthubData';
 import { useAppStore } from '../../store/useAppStore';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // Types
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 interface TimetableEntry {
   id: string;
@@ -43,6 +44,9 @@ interface TimetableEntry {
   endTime: string;
   venue: string;
   instructor?: string;
+  building?: string;
+  className?: string;
+  dayOfWeek?: string;
 }
 
 type ClassStatus = 'completed' | 'in-progress' | 'upcoming' | 'next';
@@ -54,11 +58,13 @@ interface EnrichedEntry extends TimetableEntry {
   endMinutes: number;
   durationMinutes: number;
   timeUntilStart: number;
+  displayCode: string;
+  displayName: string;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // Constants
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 const WEEK_DAYS = [
   { short: 'Mon', full: 'Monday', index: 0 },
@@ -70,16 +76,26 @@ const WEEK_DAYS = [
   { short: 'Sun', full: 'Sunday', index: 6 },
 ] as const;
 
+// Maps any day name variant to our standard index
+const DAY_NAME_MAP: Record<string, number> = {};
+WEEK_DAYS.forEach((d) => {
+  DAY_NAME_MAP[d.full] = d.index;
+  DAY_NAME_MAP[d.full.toLowerCase()] = d.index;
+  DAY_NAME_MAP[d.short] = d.index;
+  DAY_NAME_MAP[d.short.toLowerCase()] = d.index;
+});
+
 function jsDayToIndex(jsDay: number): number {
   return jsDay === 0 ? 6 : jsDay - 1;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // Time Helpers
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 function parseTimeToMinutes(time: string): number {
-  const m = time.match(/^(\d{1,2}):(\d{2})$/);
+  if (!time) return Infinity;
+  const m = time.match(/^(\d{1,2}):(\d{2})/);
   if (!m) return Infinity;
   return +m[1] * 60 + +m[2];
 }
@@ -90,15 +106,16 @@ function formatTimeOnly(time?: string): string {
   if (m) {
     const d = new Date(2000, 0, 1, +m[1], +m[2]);
     if (!Number.isNaN(d.getTime()))
-      return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      return d.toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+      });
   }
-  const iso = new Date(time);
-  if (!Number.isNaN(iso.getTime()))
-    return iso.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   return time;
 }
 
 function formatDuration(minutes: number): string {
+  if (!minutes || minutes <= 0) return '—';
   if (minutes < 60) return `${minutes}min`;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -122,17 +139,49 @@ function getTodayIndex(): number {
   return jsDayToIndex(new Date().getDay());
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// Normalize entries — handles field name variations
+// from different groups / data sources
+// ═══════════════════════════════════════════════════════════════
+
+function normalizeEntry(raw: any): TimetableEntry {
+  // Day — could be `day`, `dayOfWeek`, or already correct
+  const rawDay =
+    raw.day || raw.dayOfWeek || 'Monday';
+
+  // Normalize day string to our standard full name
+  const dayStr = String(rawDay).trim();
+  const dayIdx = DAY_NAME_MAP[dayStr] ?? DAY_NAME_MAP[dayStr.toLowerCase()] ?? 0;
+  const normalizedDay = WEEK_DAYS[dayIdx].full;
+
+  return {
+    id: raw.id || `${raw.courseCode}-${raw.startTime}-${dayIdx}`,
+    courseCode: raw.courseCode || raw.className || raw.groupName || '',
+    courseName:
+      raw.courseName || raw.className || raw.courseCode || 'Untitled Class',
+    groupName: raw.groupName || '',
+    day: normalizedDay,
+    dayIndex: raw.dayIndex ?? dayIdx,
+    startTime: raw.startTime || '08:00',
+    endTime: raw.endTime || '09:00',
+    venue: raw.venue || raw.building || '',
+    instructor: raw.instructor || '',
+    building: raw.building || '',
+    className: raw.className || '',
+    dayOfWeek: raw.dayOfWeek || normalizedDay,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Status & Progress
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 function computeClassStatus(
-  entry: TimetableEntry,
+  startMin: number,
+  endMin: number,
   selectedDayIndex: number,
 ): { status: ClassStatus; progress: number } {
   const todayIndex = getTodayIndex();
-  const startMin = parseTimeToMinutes(entry.startTime);
-  const endMin = parseTimeToMinutes(entry.endTime);
   const nowMin = getCurrentMinutes();
 
   if (selectedDayIndex !== todayIndex) {
@@ -163,10 +212,16 @@ function enrichEntries(
   const nowMin = getCurrentMinutes();
 
   const enriched = entries.map((entry) => {
-    const { status, progress } = computeClassStatus(entry, selectedDayIndex);
     const startMinutes = parseTimeToMinutes(entry.startTime);
     const endMinutes = parseTimeToMinutes(entry.endTime);
-    const durationMinutes = endMinutes - startMinutes;
+    const durationMinutes =
+      endMinutes > startMinutes ? endMinutes - startMinutes : 0;
+
+    const { status, progress } = computeClassStatus(
+      startMinutes,
+      endMinutes,
+      selectedDayIndex,
+    );
 
     let timeUntilStart: number;
     if (selectedDayIndex === todayIndex) {
@@ -178,6 +233,12 @@ function enrichEntries(
       timeUntilStart = -1;
     }
 
+    // Resolve display code — prefer courseCode, fall back to className, groupName
+    const displayCode =
+      entry.courseCode || entry.className || entry.groupName || '—';
+    const displayName =
+      entry.courseName || entry.className || entry.courseCode || 'Untitled';
+
     return {
       ...entry,
       status,
@@ -186,9 +247,12 @@ function enrichEntries(
       endMinutes,
       durationMinutes,
       timeUntilStart,
+      displayCode,
+      displayName,
     };
   });
 
+  // Sort: in-progress first, then upcoming (mark first as 'next'), then completed
   const order: Record<ClassStatus, number> = {
     'in-progress': 0,
     next: 1,
@@ -201,15 +265,16 @@ function enrichEntries(
     return diff !== 0 ? diff : a.startMinutes - b.startMinutes;
   });
 
+  // Mark the first upcoming entry as 'next'
   const first = enriched.find((e) => e.status === 'upcoming');
   if (first) first.status = 'next';
 
   return enriched;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Responsive CSS (injected once)
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// CSS
+// ═══════════════════════════════════════════════════════════════
 
 const TIMETABLE_CSS = `
   /* ── Day Selector ─────────────────────────────────────────── */
@@ -218,12 +283,13 @@ const TIMETABLE_CSS = `
     align-items: stretch;
     gap: 4px;
     padding: 6px;
-    border-radius: var(--radius-xl);
-    background: var(--bg-muted);
+    border-radius: var(--radius-xl, 16px);
+    background: var(--bg-muted, rgba(255,255,255,0.03));
     border: 1px solid var(--border);
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
+    min-width: 0;
   }
   .tt-day-bar::-webkit-scrollbar { display: none; }
 
@@ -234,55 +300,55 @@ const TIMETABLE_CSS = `
     justify-content: center;
     gap: 4px;
     min-width: 54px;
-    padding: 10px 14px;
-    border-radius: var(--radius-lg);
+    flex: 1 1 0%;
+    padding: 10px 8px;
+    border-radius: var(--radius-lg, 12px);
     border: 1.5px solid transparent;
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
     position: relative;
     font-weight: 400;
-    flex-shrink: 0;
-    transition: all var(--duration) var(--ease);
+    transition: all 0.15s ease;
   }
   .tt-day-btn:hover {
-    background: var(--bg-card);
+    background: var(--bg-card, rgba(255,255,255,0.04));
     color: var(--text-primary);
   }
   .tt-day-btn[data-active="true"] {
     border-color: var(--primary);
-    background: var(--bg-card);
+    background: var(--bg-card, rgba(255,255,255,0.04));
     color: var(--primary);
     font-weight: 600;
     box-shadow: var(--shadow-sm);
   }
   .tt-day-btn__label {
-    font-size: 0.68rem;
+    font-size: 0.66rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     line-height: 1;
   }
   .tt-day-btn__date {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 600;
     line-height: 1;
   }
   .tt-day-btn__dot {
     position: absolute;
-    bottom: 5px;
+    bottom: 4px;
     left: 50%;
     transform: translateX(-50%);
-    width: 5px;
-    height: 5px;
+    width: 4px;
+    height: 4px;
     border-radius: 50%;
     background: var(--primary);
   }
   .tt-day-btn__event-dot {
     position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 6px;
-    height: 6px;
+    top: 5px;
+    right: 5px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     background: var(--primary);
     opacity: 0.5;
@@ -294,38 +360,40 @@ const TIMETABLE_CSS = `
     gap: 0;
     padding: 0;
     overflow: hidden;
-    transition: all var(--duration) var(--ease);
+    transition: all 0.15s ease;
+    min-width: 0;
   }
   .tt-class-card[data-status="completed"] {
-    opacity: 0.55;
+    opacity: 0.5;
   }
   .tt-class-card[data-status="in-progress"] {
-    border-color: var(--primary-alpha-25);
+    border-color: var(--primary-alpha-25, rgba(59,130,246,0.25));
   }
   .tt-class-card[data-status="next"] {
-    border-color: var(--success-alpha-22);
+    border-color: var(--success-alpha-22, rgba(46,204,113,0.22));
   }
   .tt-class-card:hover {
-    transform: translateY(-2px);
+    transform: translateY(-1px);
     box-shadow: var(--shadow-lg);
     opacity: 1 !important;
   }
 
   .tt-card-inner {
     display: grid;
-    gap: 14px;
-    padding: 20px;
+    gap: 12px;
+    padding: 16px;
   }
 
   .tt-card-top {
     display: flex;
-    gap: 14px;
+    gap: 12px;
     align-items: flex-start;
+    min-width: 0;
   }
 
   .tt-card-info {
     display: grid;
-    gap: 6px;
+    gap: 5px;
     flex: 1;
     min-width: 0;
   }
@@ -333,51 +401,53 @@ const TIMETABLE_CSS = `
   .tt-card-badges {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     flex-wrap: wrap;
   }
 
   .tt-card-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 14px;
-    font-size: 0.82rem;
+    gap: 4px 12px;
+    font-size: 0.8rem;
     color: var(--text-secondary);
   }
 
   .tt-meta-item {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
   }
 
   .tt-time-col {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 3px;
+    gap: 2px;
     flex-shrink: 0;
     text-align: right;
   }
 
   .tt-time-start {
-    font-size: 0.92rem;
+    font-size: 0.9rem;
     font-weight: 600;
     line-height: 1.2;
     color: var(--text-primary);
   }
-
   .tt-time-end {
-    font-size: 0.76rem;
+    font-size: 0.74rem;
     color: var(--text-tertiary);
   }
-
   .tt-time-label {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 600;
     margin-top: 2px;
   }
-
   .tt-time-label--live { color: var(--primary); }
   .tt-time-label--next { color: var(--success); }
 
@@ -385,68 +455,64 @@ const TIMETABLE_CSS = `
   .tt-status-icon {
     display: grid;
     place-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius);
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius, 8px);
     flex-shrink: 0;
-    transition: all var(--duration) var(--ease);
+    transition: all 0.15s ease;
   }
   .tt-status-icon--completed {
-    background: var(--success-soft);
-    color: var(--success);
+    background: var(--success-soft, rgba(46,204,113,0.12));
+    color: var(--success, #2ECC71);
   }
   .tt-status-icon--in-progress {
-    background: var(--primary-soft);
-    color: var(--primary);
+    background: var(--primary-soft, rgba(59,130,246,0.12));
+    color: var(--primary, #3B82F6);
   }
   .tt-status-icon--next {
-    background: var(--success-soft);
-    color: var(--success);
+    background: var(--success-soft, rgba(46,204,113,0.12));
+    color: var(--success, #2ECC71);
   }
   .tt-status-icon--upcoming {
-    background: var(--muted-alpha-10);
+    background: var(--muted-alpha-10, rgba(107,114,128,0.1));
     color: var(--text-tertiary);
   }
 
   /* ── Progress Bar ─────────────────────────────────────────── */
   .tt-progress {
     height: 3px;
-    background: var(--divider);
+    background: var(--divider, rgba(255,255,255,0.06));
     overflow: hidden;
     position: relative;
   }
   .tt-progress__fill {
     position: absolute;
     inset: 0;
-    transition: width 1s var(--ease-smooth);
+    transition: width 1s ease;
   }
-  .tt-progress__fill--completed {
-    background: var(--success);
-  }
-  .tt-progress__fill--in-progress {
-    background: var(--primary);
-  }
+  .tt-progress__fill--completed { background: var(--success, #2ECC71); }
+  .tt-progress__fill--in-progress { background: var(--primary, #3B82F6); }
 
   /* ── Summary Bar ──────────────────────────────────────────── */
   .tt-summary {
     display: flex;
-    gap: 14px;
+    gap: 12px;
     flex-wrap: wrap;
-    padding: 12px 16px;
-    border-radius: var(--radius-lg);
-    background: var(--bg-muted);
+    padding: 10px 14px;
+    border-radius: var(--radius-lg, 12px);
+    background: var(--bg-muted, rgba(255,255,255,0.03));
     border: 1px solid var(--border);
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     color: var(--text-secondary);
     font-weight: 500;
   }
   .tt-summary__item {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
   }
-  .tt-summary__item--done { color: var(--success); }
-  .tt-summary__item--live { color: var(--primary); }
+  .tt-summary__item--done { color: var(--success, #2ECC71); }
+  .tt-summary__item--live { color: var(--primary, #3B82F6); }
 
   /* ── Now Indicator ────────────────────────────────────────── */
   .tt-now {
@@ -454,22 +520,21 @@ const TIMETABLE_CSS = `
     align-items: center;
     gap: 10px;
     padding: 8px 14px;
-    margin: 4px 0;
-    border-radius: var(--radius);
-    background: var(--primary-soft);
-    border: 1px solid var(--primary-alpha-25);
+    margin: 2px 0;
+    border-radius: var(--radius, 8px);
+    background: var(--primary-soft, rgba(59,130,246,0.12));
+    border: 1px solid var(--primary-alpha-25, rgba(59,130,246,0.25));
     font-size: 0.8rem;
     font-weight: 600;
-    color: var(--primary);
-    animation: fade-in-up var(--duration-slow) var(--ease) both;
+    color: var(--primary, #3B82F6);
   }
   .tt-now__dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--primary);
-    box-shadow: 0 0 0 3px var(--primary-alpha-12);
-    animation: pulse-dot 2s ease-in-out infinite;
+    background: var(--primary, #3B82F6);
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+    animation: pulseDot 2s ease-in-out infinite;
     flex-shrink: 0;
   }
 
@@ -477,73 +542,97 @@ const TIMETABLE_CSS = `
   .tt-day-nav {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
   }
   .tt-day-nav__center {
     flex: 1;
     text-align: center;
+    min-width: 0;
   }
   .tt-day-nav__title {
-    font-size: 1.15rem;
+    font-size: 1.1rem;
     font-weight: 700;
   }
   .tt-day-nav__today {
-    font-size: 0.74rem;
+    font-size: 0.72rem;
     font-weight: 600;
-    color: var(--primary);
+    color: var(--primary, #3B82F6);
   }
 
   /* ── Calendar Grid ────────────────────────────────────────── */
   .tt-cal-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 12px;
+    gap: 10px;
+    min-width: 0;
+  }
+  @media (max-width: 520px) {
+    .tt-cal-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
   }
 
   .tt-cal-day {
-    padding: 16px;
+    padding: 14px;
     display: grid;
-    gap: 10px;
+    gap: 8px;
     cursor: pointer;
-    transition: all var(--duration) var(--ease);
+    transition: all 0.15s ease;
+    min-width: 0;
+    overflow: hidden;
   }
   .tt-cal-day:hover {
-    transform: translateY(-2px);
+    transform: translateY(-1px);
     box-shadow: var(--shadow-lg);
-    border-color: var(--glass-border-hover);
   }
   .tt-cal-day[data-today="true"] {
-    border-color: var(--primary-alpha-25);
+    border-color: var(--primary-alpha-25, rgba(59,130,246,0.25));
   }
   .tt-cal-day[data-empty="true"] {
-    opacity: 0.6;
+    opacity: 0.55;
   }
 
   .tt-cal-event {
     display: grid;
-    gap: 3px;
-    padding: 8px 10px;
-    border-radius: var(--radius-sm);
-    background: var(--primary-soft);
-    font-size: 0.78rem;
+    gap: 2px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: var(--primary-soft, rgba(59,130,246,0.12));
+    font-size: 0.76rem;
+    min-width: 0;
+    overflow: hidden;
   }
   .tt-cal-event__time {
     font-weight: 600;
-    color: var(--primary);
+    color: var(--primary, #3B82F6);
+    font-size: 0.72rem;
+  }
+  .tt-cal-event__name {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
   }
   .tt-cal-event__code {
-    color: var(--text-primary);
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* ── List View Day Header ─────────────────────────────────── */
   .tt-list-day-head {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 4px 0;
+    flex-wrap: wrap;
   }
   .tt-list-day-head h2 {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 700;
   }
   .tt-list-day-head .muted {
@@ -556,81 +645,79 @@ const TIMETABLE_CSS = `
     display: grid;
     place-items: center;
     text-align: center;
-    padding: 48px 24px;
-    gap: 14px;
+    padding: 48px 20px;
+    gap: 12px;
   }
   .tt-empty__icon {
     display: grid;
     place-items: center;
     width: 52px;
     height: 52px;
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-lg, 12px);
   }
   .tt-empty__icon--free {
-    background: var(--success-soft);
-    color: var(--success);
+    background: var(--success-soft, rgba(46,204,113,0.12));
+    color: var(--success, #2ECC71);
   }
   .tt-empty__icon--none {
-    background: var(--muted-alpha-10);
+    background: var(--muted-alpha-10, rgba(107,114,128,0.1));
     color: var(--text-tertiary);
   }
 
-  /* ── Mobile tweaks ────────────────────────────────────────── */
+  /* ── Animations ───────────────────────────────────────────── */
+  @keyframes pulseDot {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+    50% { box-shadow: 0 0 0 6px rgba(59,130,246,0); }
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ── Mobile ───────────────────────────────────────────────── */
   @media (max-width: 720px) {
     .tt-day-btn {
-      min-width: 46px;
-      padding: 8px 10px;
+      min-width: 44px;
+      padding: 8px 6px;
     }
-    .tt-day-btn__date { font-size: 0.95rem; }
-    .tt-day-btn__label { font-size: 0.62rem; }
+    .tt-day-btn__date { font-size: 0.92rem; }
+    .tt-day-btn__label { font-size: 0.6rem; }
+    .tt-card-inner { padding: 14px; gap: 10px; }
+    .tt-status-icon { width: 34px; height: 34px; }
+    .tt-summary { padding: 8px 12px; gap: 8px; font-size: 0.78rem; }
+  }
 
-    .tt-card-inner { padding: 16px; gap: 12px; }
-
-    .tt-card-top {
-      flex-direction: column;
-      gap: 10px;
-    }
+  @media (max-width: 480px) {
     .tt-card-top .tt-status-icon { display: none; }
     .tt-time-col {
       flex-direction: row;
-      gap: 8px;
+      gap: 6px;
       align-items: center;
     }
-    .tt-time-start { font-size: 0.84rem; }
-
-    .tt-summary { padding: 10px 14px; gap: 10px; }
-
-    .tt-cal-grid {
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 8px;
-    }
-    .tt-cal-day { padding: 12px; }
+    .tt-time-start { font-size: 0.82rem; }
+    .tt-card-meta { gap: 3px 8px; font-size: 0.76rem; }
+    .tt-meta-item { max-width: 150px; }
+    .tt-day-btn { min-width: 38px; padding: 6px 4px; gap: 3px; }
+    .tt-day-btn__date { font-size: 0.85rem; }
   }
 
-  @media (max-width: 420px) {
-    .tt-card-meta { gap: 4px 10px; font-size: 0.78rem; }
-    .tt-day-btn { min-width: 40px; padding: 6px 8px; gap: 3px; }
-    .tt-day-btn__date { font-size: 0.88rem; }
-  }
-
-  /* ── Hover-capable ────────────────────────────────────────── */
   @media (hover: none) and (pointer: coarse) {
     .tt-class-card:hover,
-    .tt-cal-day:hover {
-      transform: none;
-    }
-    .tt-class-card:active {
-      transform: scale(0.98);
-      transition-duration: var(--duration-instant);
-    }
+    .tt-cal-day:hover { transform: none; }
+    .tt-class-card:active { transform: scale(0.98); }
   }
 `;
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // Sub-components
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
-function StatusBadge({ status, progress }: { status: ClassStatus; progress: number }) {
+function StatusBadge({
+  status,
+  progress,
+}: {
+  status: ClassStatus;
+  progress: number;
+}) {
   switch (status) {
     case 'completed':
       return <Badge tone="success">Done</Badge>;
@@ -644,22 +731,28 @@ function StatusBadge({ status, progress }: { status: ClassStatus; progress: numb
 }
 
 function StatusIcon({ status }: { status: ClassStatus }) {
-  const cls = `tt-status-icon tt-status-icon--${status}`;
   return (
-    <div className={cls} aria-hidden>
-      {status === 'completed' && <CheckCircle2 size={18} />}
-      {status === 'in-progress' && (
-        <Timer size={18} style={{ animation: 'pulse-dot 2s ease-in-out infinite' }} />
-      )}
-      {status === 'next' && <ArrowRight size={18} />}
-      {status === 'upcoming' && <Circle size={18} />}
+    <div className={`tt-status-icon tt-status-icon--${status}`} aria-hidden>
+      {status === 'completed' && <CheckCircle2 size={16} />}
+      {status === 'in-progress' && <Radio size={16} />}
+      {status === 'next' && <ArrowRight size={16} />}
+      {status === 'upcoming' && <Circle size={16} />}
     </div>
   );
 }
 
-function ProgressBar({ progress, status }: { progress: number; status: ClassStatus }) {
+function ProgressBar({
+  progress,
+  status,
+}: {
+  progress: number;
+  status: ClassStatus;
+}) {
   if (status === 'upcoming' || status === 'next') return null;
-  const cls = status === 'completed' ? 'tt-progress__fill--completed' : 'tt-progress__fill--in-progress';
+  const cls =
+    status === 'completed'
+      ? 'tt-progress__fill--completed'
+      : 'tt-progress__fill--in-progress';
 
   return (
     <div
@@ -668,9 +761,11 @@ function ProgressBar({ progress, status }: { progress: number; status: ClassStat
       aria-valuenow={progress}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-label={`Class progress: ${progress}%`}
     >
-      <div className={`tt-progress__fill ${cls}`} style={{ width: `${progress}%` }} />
+      <div
+        className={`tt-progress__fill ${cls}`}
+        style={{ width: `${progress}%` }}
+      />
     </div>
   );
 }
@@ -685,12 +780,24 @@ function NowIndicator() {
   return (
     <div className="tt-now" role="status" aria-live="polite">
       <div className="tt-now__dot" />
-      <span>Now — {time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+      <span>
+        Now —{' '}
+        {time.toLocaleTimeString([], {
+          hour: 'numeric',
+          minute: '2-digit',
+        })}
+      </span>
     </div>
   );
 }
 
-function ClassCard({ entry, index }: { entry: EnrichedEntry; index: number }) {
+function ClassCard({
+  entry,
+  index,
+}: {
+  entry: EnrichedEntry;
+  index: number;
+}) {
   const isLive = entry.status === 'in-progress';
   const isNext = entry.status === 'next';
 
@@ -699,7 +806,6 @@ function ClassCard({ entry, index }: { entry: EnrichedEntry; index: number }) {
       className="tt-class-card"
       data-status={entry.status}
       style={{ animationDelay: `${0.04 + index * 0.04}s` } as CSSProperties}
-      aria-label={`${entry.courseName}, ${formatTimeOnly(entry.startTime)} to ${formatTimeOnly(entry.endTime)}, ${entry.status}`}
     >
       <div className="tt-card-inner">
         <div className="tt-card-top">
@@ -707,26 +813,42 @@ function ClassCard({ entry, index }: { entry: EnrichedEntry; index: number }) {
 
           <div className="tt-card-info">
             <div className="tt-card-badges">
-              <Badge tone="info">{entry.courseCode || entry.groupName || 'Unknown'}</Badge>
-              <StatusBadge status={entry.status} progress={entry.progress} />
+              <Badge tone="info">{entry.displayCode}</Badge>
+              <StatusBadge
+                status={entry.status}
+                progress={entry.progress}
+              />
             </div>
 
-            <h3 style={{ fontSize: '0.98rem', fontWeight: 600 }}>
-              {entry.courseName}
+            <h3
+              style={{
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {entry.displayName}
             </h3>
 
             <div className="tt-card-meta">
-              <span className="tt-meta-item">
-                <MapPin size={14} aria-hidden />
-                {entry.venue || 'TBA'}
-              </span>
-              <span className="tt-meta-item">
-                <Clock size={14} aria-hidden />
-                {formatDuration(entry.durationMinutes)}
-              </span>
+              {entry.venue && (
+                <span className="tt-meta-item">
+                  <MapPin size={13} style={{ flexShrink: 0 }} />
+                  {entry.venue}
+                  {entry.building ? `, ${entry.building}` : ''}
+                </span>
+              )}
+              {entry.durationMinutes > 0 && (
+                <span className="tt-meta-item">
+                  <Clock size={13} style={{ flexShrink: 0 }} />
+                  {formatDuration(entry.durationMinutes)}
+                </span>
+              )}
               {entry.instructor && (
                 <span className="tt-meta-item">
-                  <GraduationCap size={14} aria-hidden />
+                  <GraduationCap size={13} style={{ flexShrink: 0 }} />
                   {entry.instructor}
                 </span>
               )}
@@ -734,11 +856,19 @@ function ClassCard({ entry, index }: { entry: EnrichedEntry; index: number }) {
           </div>
 
           <div className="tt-time-col">
-            <span className="tt-time-start">{formatTimeOnly(entry.startTime)}</span>
-            <span className="tt-time-end">{formatTimeOnly(entry.endTime)}</span>
+            <span className="tt-time-start">
+              {formatTimeOnly(entry.startTime)}
+            </span>
+            <span className="tt-time-end">
+              {formatTimeOnly(entry.endTime)}
+            </span>
             {(isLive || isNext) && (
-              <span className={`tt-time-label ${isLive ? 'tt-time-label--live' : 'tt-time-label--next'}`}>
-                {isLive ? `${entry.progress}% elapsed` : formatTimeUntil(entry.timeUntilStart)}
+              <span
+                className={`tt-time-label ${isLive ? 'tt-time-label--live' : 'tt-time-label--next'}`}
+              >
+                {isLive
+                  ? `${entry.progress}% done`
+                  : formatTimeUntil(entry.timeUntilStart)}
               </span>
             )}
           </div>
@@ -753,34 +883,38 @@ function ClassCard({ entry, index }: { entry: EnrichedEntry; index: number }) {
 function DaySummary({ entries }: { entries: EnrichedEntry[] }) {
   const completed = entries.filter((e) => e.status === 'completed').length;
   const live = entries.filter((e) => e.status === 'in-progress').length;
-  const upcoming = entries.filter((e) => e.status === 'upcoming' || e.status === 'next').length;
+  const upcoming = entries.filter(
+    (e) => e.status === 'upcoming' || e.status === 'next',
+  ).length;
   const totalMin = entries.reduce((s, e) => s + e.durationMinutes, 0);
 
   return (
-    <div className="tt-summary" role="status" aria-label="Day summary">
+    <div className="tt-summary" role="status">
       <span className="tt-summary__item">
-        <BookOpen size={14} />
+        <BookOpen size={13} />
         {entries.length} {entries.length === 1 ? 'class' : 'classes'}
       </span>
-      <span className="tt-summary__item">
-        <Clock size={14} />
-        {formatDuration(totalMin)}
-      </span>
+      {totalMin > 0 && (
+        <span className="tt-summary__item">
+          <Clock size={13} />
+          {formatDuration(totalMin)}
+        </span>
+      )}
       {completed > 0 && (
         <span className="tt-summary__item tt-summary__item--done">
-          <CheckCircle2 size={14} />
+          <CheckCircle2 size={13} />
           {completed} done
         </span>
       )}
       {live > 0 && (
         <span className="tt-summary__item tt-summary__item--live">
-          <Timer size={14} />
+          <Radio size={13} />
           {live} live
         </span>
       )}
       {upcoming > 0 && (
         <span className="tt-summary__item">
-          <Circle size={14} />
+          <Circle size={13} />
           {upcoming} left
         </span>
       )}
@@ -812,12 +946,23 @@ function DaySelector({
   }, []);
 
   useEffect(() => {
-    const el = scrollRef.current?.querySelector('[data-active="true"]') as HTMLElement;
-    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    const el = scrollRef.current?.querySelector(
+      '[data-active="true"]',
+    ) as HTMLElement;
+    el?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+      inline: 'center',
+    });
   }, [selectedIndex]);
 
   return (
-    <div ref={scrollRef} className="tt-day-bar" role="tablist" aria-label="Select day">
+    <div
+      ref={scrollRef}
+      className="tt-day-bar"
+      role="tablist"
+      aria-label="Select day"
+    >
       {WEEK_DAYS.map((day, i) => {
         const isActive = selectedIndex === i;
         const isToday = todayIndex === i;
@@ -830,12 +975,13 @@ function DaySelector({
             className="tt-day-btn"
             aria-selected={isActive}
             data-active={isActive}
-            aria-label={`${day.full}${isToday ? ' (today)' : ''}, ${count} classes`}
             onClick={() => onSelect(i)}
           >
             <span className="tt-day-btn__label">{day.short}</span>
             <span className="tt-day-btn__date">{weekDates[i]}</span>
-            {count > 0 && !isActive && <div className="tt-day-btn__event-dot" aria-hidden />}
+            {count > 0 && !isActive && (
+              <div className="tt-day-btn__event-dot" aria-hidden />
+            )}
             {isToday && <div className="tt-day-btn__dot" aria-hidden />}
           </button>
         );
@@ -851,12 +997,21 @@ function EmptyDayState({ dayName }: { dayName: string }) {
         <Coffee size={24} />
       </div>
       <h3 style={{ fontSize: '1rem' }}>No classes on {dayName}</h3>
-      <p style={{ color: 'var(--text-secondary)', maxWidth: '34ch', fontSize: '0.88rem', lineHeight: 1.6 }}>
+      <p
+        style={{
+          color: 'var(--text-secondary)',
+          maxWidth: '34ch',
+          fontSize: '0.86rem',
+          lineHeight: 1.6,
+        }}
+      >
         Enjoy your free time! Nothing scheduled for this day.
       </p>
     </div>
   );
 }
+
+/* ── Calendar Overview — FIXED course code display ────────── */
 
 function CalendarOverview({
   eventsByDay,
@@ -882,7 +1037,6 @@ function CalendarOverview({
             onClick={() => onSelectDay(i)}
             role="button"
             tabIndex={0}
-            aria-label={`${day.full}, ${events.length} classes`}
             onKeyDown={(e: React.KeyboardEvent) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
@@ -890,28 +1044,76 @@ function CalendarOverview({
               }
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong style={{ fontSize: '0.88rem' }}>{day.short}</strong>
+            {/* Header row */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <strong style={{ fontSize: '0.86rem' }}>{day.short}</strong>
               {isToday && (
-                <Badge tone="warning" style={{ fontSize: '0.6rem', padding: '1px 6px' }}>Today</Badge>
+                <Badge
+                  tone="warning"
+                  style={{ fontSize: '0.58rem', padding: '1px 5px' }}
+                >
+                  Today
+                </Badge>
               )}
             </div>
 
             {events.length === 0 ? (
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>Free day</span>
+              <span
+                style={{
+                  fontSize: '0.76rem',
+                  color: 'var(--text-tertiary)',
+                }}
+              >
+                Free day
+              </span>
             ) : (
               <>
-                <Badge tone="info">
-                  {events.length} {events.length === 1 ? 'class' : 'classes'}
+                <Badge tone="info" style={{ fontSize: '0.68rem' }}>
+                  {events.length}{' '}
+                  {events.length === 1 ? 'class' : 'classes'}
                 </Badge>
-                {events.slice(0, 2).map((ev) => (
-                  <div key={ev.id} className="tt-cal-event">
-                    <span className="tt-cal-event__time">{formatTimeOnly(ev.startTime)}</span>
-                    <span className="tt-cal-event__code">{ev.courseCode}</span>
-                  </div>
-                ))}
+
+                {events.slice(0, 2).map((ev) => {
+                  // Use the correct display values
+                  const code =
+                    ev.courseCode ||
+                    ev.className ||
+                    ev.groupName ||
+                    '—';
+                  const name =
+                    ev.courseName ||
+                    ev.className ||
+                    ev.courseCode ||
+                    '';
+
+                  return (
+                    <div key={ev.id} className="tt-cal-event">
+                      <span className="tt-cal-event__time">
+                        {formatTimeOnly(ev.startTime)}
+                      </span>
+                      {name && name !== code && (
+                        <span className="tt-cal-event__name">
+                          {name}
+                        </span>
+                      )}
+                      <span className="tt-cal-event__code">{code}</span>
+                    </div>
+                  );
+                })}
+
                 {events.length > 2 && (
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)' }}>
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      color: 'var(--text-tertiary)',
+                    }}
+                  >
                     +{events.length - 2} more
                   </span>
                 )}
@@ -924,9 +1126,9 @@ function CalendarOverview({
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // Skeleton Loaders
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 function DaySelectorSkeleton() {
   return (
@@ -935,7 +1137,12 @@ function DaySelectorSkeleton() {
         <div
           key={i}
           className="skeleton"
-          style={{ minWidth: 54, height: 62, borderRadius: 'var(--radius-lg)', flexShrink: 0 }}
+          style={{
+            minWidth: 54,
+            flex: '1 1 0%',
+            height: 58,
+            borderRadius: 'var(--radius-lg, 12px)',
+          }}
         />
       ))}
     </div>
@@ -950,19 +1157,36 @@ function CardSkeleton({ index }: { index: number }) {
       aria-busy="true"
     >
       <div className="tt-card-inner">
-        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-          <div className="skeleton" style={{ width: 40, height: 40, borderRadius: 'var(--radius)' }} />
-          <div style={{ flex: 1, display: 'grid', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <div className="skeleton" style={{ width: 55, height: 18, borderRadius: 'var(--radius-full)' }} />
-              <div className="skeleton" style={{ width: 50, height: 18, borderRadius: 'var(--radius-full)' }} />
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <div
+            className="skeleton"
+            style={{ width: 38, height: 38, borderRadius: 'var(--radius)' }}
+          />
+          <div style={{ flex: 1, display: 'grid', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 5 }}>
+              <div
+                className="skeleton"
+                style={{
+                  width: 50,
+                  height: 18,
+                  borderRadius: 'var(--radius-full)',
+                }}
+              />
+              <div
+                className="skeleton"
+                style={{
+                  width: 45,
+                  height: 18,
+                  borderRadius: 'var(--radius-full)',
+                }}
+              />
             </div>
-            <div className="skeleton" style={{ width: '70%', height: 16 }} />
-            <div className="skeleton" style={{ width: '50%', height: 13 }} />
+            <div className="skeleton" style={{ width: '65%', height: 15 }} />
+            <div className="skeleton" style={{ width: '45%', height: 12 }} />
           </div>
-          <div style={{ display: 'grid', gap: 4, justifyItems: 'end' }}>
-            <div className="skeleton" style={{ width: 55, height: 15 }} />
-            <div className="skeleton" style={{ width: 40, height: 12 }} />
+          <div style={{ display: 'grid', gap: 3, justifyItems: 'end' }}>
+            <div className="skeleton" style={{ width: 50, height: 14 }} />
+            <div className="skeleton" style={{ width: 38, height: 11 }} />
           </div>
         </div>
       </div>
@@ -971,17 +1195,22 @@ function CardSkeleton({ index }: { index: number }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Full-page States
-// ═══════════════════════════════════════════════════════════════════════════
-
 function LoadingState() {
   return (
     <PageFrame eyebrow="Timetable" title="Loading your schedule…">
       <DaySelectorSkeleton />
-      <div className="skeleton" style={{ width: '100%', height: 42, borderRadius: 'var(--radius-lg)' }} />
+      <div
+        className="skeleton"
+        style={{
+          width: '100%',
+          height: 40,
+          borderRadius: 'var(--radius-lg)',
+        }}
+      />
       <div style={{ display: 'grid', gap: 10 }}>
-        {[0, 1, 2, 3].map((i) => <CardSkeleton key={i} index={i} />)}
+        {[0, 1, 2, 3].map((i) => (
+          <CardSkeleton key={i} index={i} />
+        ))}
       </div>
       <div
         style={{
@@ -993,25 +1222,30 @@ function LoadingState() {
           color: 'var(--text-tertiary)',
           fontSize: '0.84rem',
         }}
-        role="status"
-        aria-live="polite"
       >
-        <Loader2 size={16} style={{ animation: 'spin 700ms linear infinite' }} />
+        <Loader2
+          size={16}
+          style={{ animation: 'spin 700ms linear infinite' }}
+        />
         Fetching your schedule…
       </div>
     </PageFrame>
   );
 }
 
-function ErrorState({ error, onRetry }: { error: Error | null; onRetry: () => void }) {
+function ErrorState({
+  error,
+  onRetry,
+}: {
+  error: Error | null;
+  onRetry: () => void;
+}) {
   return (
     <PageFrame eyebrow="Timetable" title="Something went wrong">
       <Card
         style={{
           display: 'grid',
           gap: 18,
-          borderColor: 'var(--error-alpha-20)',
-          background: 'var(--error-alpha-10)',
           maxWidth: 600,
         }}
         role="alert"
@@ -1033,8 +1267,14 @@ function ErrorState({ error, onRetry }: { error: Error | null; onRetry: () => vo
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
             <h3>Connection problem</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.6 }}>
-              Couldn't load your timetable. Check your connection and try again.
+            <p
+              style={{
+                color: 'var(--text-secondary)',
+                fontSize: '0.9rem',
+                lineHeight: 1.6,
+              }}
+            >
+              Couldn't load your timetable.
             </p>
             {error && (
               <p
@@ -1052,11 +1292,20 @@ function ErrorState({ error, onRetry }: { error: Error | null; onRetry: () => vo
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <Button variant="primary" size="sm" leadingIcon={<RefreshCw size={15} />} onClick={onRetry}>
+          <Button
+            variant="primary"
+            size="sm"
+            leadingIcon={<RefreshCw size={15} />}
+            onClick={onRetry}
+          >
             Try again
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => window.location.reload()}>
-            Reload page
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => window.location.reload()}
+          >
+            Reload
           </Button>
         </div>
       </Card>
@@ -1064,9 +1313,9 @@ function ErrorState({ error, onRetry }: { error: Error | null; onRetry: () => vo
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // Main Component
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 export function TimetablePage() {
   const scheduleView = useAppStore((s) => s.scheduleView);
@@ -1084,43 +1333,65 @@ export function TimetablePage() {
 
   const query = useQuery({
     queryKey: ['timetable', userId],
-    queryFn: () => (userId ? fetchUserTimetableEntries(userId) : Promise.resolve([])),
+    queryFn: () =>
+      userId ? fetchUserTimetableEntries(userId) : Promise.resolve([]),
     enabled: Boolean(userId),
     staleTime: 60_000,
     retry: 2,
-    retryDelay: (a: number) => Math.min(1000 * 2 ** a, 8000),
   });
 
   const retry = useCallback(() => query.refetch(), [query]);
 
-  // ── Derived ─────────────────────────────────────────────────────────────
+  // ── Normalize raw entries ───────────────────────────────────
 
-  const allEntries = (query.data ?? []) as TimetableEntry[];
+  const allEntries: TimetableEntry[] = useMemo(
+    () => ((query.data as any[]) ?? []).map(normalizeEntry),
+    [query.data],
+  );
+
+  // ── Group by day ────────────────────────────────────────────
 
   const eventsByDay = useMemo(() => {
+    const map = new Map<string, TimetableEntry[]>();
+
+    // Initialize all days to ensure consistent ordering
+    WEEK_DAYS.forEach((d) => map.set(d.full, []));
+
+    // Sort then bucket
     const sorted = [...allEntries].sort((a, b) =>
       a.dayIndex !== b.dayIndex
         ? a.dayIndex - b.dayIndex
-        : parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime),
+        : parseTimeToMinutes(a.startTime) -
+          parseTimeToMinutes(b.startTime),
     );
-    const map = new Map<string, TimetableEntry[]>();
+
     for (const e of sorted) {
-      if (!map.has(e.day)) map.set(e.day, []);
-      map.get(e.day)!.push(e);
+      const dayKey = e.day; // already normalized by normalizeEntry
+      const arr = map.get(dayKey);
+      if (arr) arr.push(e);
     }
+
     return map;
   }, [allEntries]);
+
+  // ── Selected day data ───────────────────────────────────────
 
   const selectedDay = WEEK_DAYS[selectedDayIndex];
   const todayIndex = getTodayIndex();
   const isToday = selectedDayIndex === todayIndex;
 
   const dayEntries = useMemo(
-    () => enrichEntries(eventsByDay.get(selectedDay.full) ?? [], selectedDayIndex),
+    () =>
+      enrichEntries(
+        eventsByDay.get(selectedDay.full) ?? [],
+        selectedDayIndex,
+      ),
     [eventsByDay, selectedDay.full, selectedDayIndex],
   );
 
-  const hasLiveClass = dayEntries.some((e) => e.status === 'in-progress');
+  const hasLiveClass = dayEntries.some(
+    (e) => e.status === 'in-progress',
+  );
 
   const handleDaySelect = useCallback(
     (i: number) => {
@@ -1130,24 +1401,38 @@ export function TimetablePage() {
     [scheduleView, setScheduleView],
   );
 
-  const goToToday = useCallback(() => setSelectedDayIndex(getTodayIndex()), []);
+  const goToToday = useCallback(
+    () => setSelectedDayIndex(getTodayIndex()),
+    [],
+  );
 
-  // ── Guards ──────────────────────────────────────────────────────────────
+  // ── Guards ──────────────────────────────────────────────────
 
-  if (query.isLoading) return <><style>{TIMETABLE_CSS}</style><LoadingState /></>;
+  if (query.isLoading)
+    return (
+      <>
+        <style>{TIMETABLE_CSS}</style>
+        <LoadingState />
+      </>
+    );
 
   if (query.isError) {
     return (
       <>
         <style>{TIMETABLE_CSS}</style>
-        <ErrorState error={query.error instanceof Error ? query.error : null} onRetry={retry} />
+        <ErrorState
+          error={
+            query.error instanceof Error ? query.error : null
+          }
+          onRetry={retry}
+        />
       </>
     );
   }
 
   const isEmpty = allEntries.length === 0;
 
-  // ── Render ──────────────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────────────
 
   return (
     <>
@@ -1159,13 +1444,18 @@ export function TimetablePage() {
         description="Classes for the week, sorted by time with live progress."
         action={
           !isToday ? (
-            <Button variant="secondary" size="sm" leadingIcon={<CalendarDays size={16} />} onClick={goToToday}>
+            <Button
+              variant="secondary"
+              size="sm"
+              leadingIcon={<CalendarDays size={16} />}
+              onClick={goToToday}
+            >
               Go to today
             </Button>
           ) : undefined
         }
       >
-        {/* ── Day Selector ──────────────────────────────────────── */}
+        {/* ── Day Selector ──────────────────────────── */}
         {!isEmpty && (
           <DaySelector
             selectedIndex={selectedDayIndex}
@@ -1174,7 +1464,7 @@ export function TimetablePage() {
           />
         )}
 
-        {/* ── View Tabs ─────────────────────────────────────────── */}
+        {/* ── View Tabs ─────────────────────────────── */}
         {!isEmpty && (
           <Tabs
             tabs={[
@@ -1182,33 +1472,44 @@ export function TimetablePage() {
               { id: 'list', label: 'All days' },
               { id: 'calendar', label: 'Overview' },
             ]}
-            activeId={scheduleView === 'week' ? 'day' : scheduleView}
-            onChange={(v) => setScheduleView(v as 'day' | 'list' | 'calendar')}
+            activeId={
+              scheduleView === 'week' ? 'day' : scheduleView
+            }
+            onChange={(v) =>
+              setScheduleView(v as 'day' | 'list' | 'calendar')
+            }
           />
         )}
 
-        {/* ── Content ───────────────────────────────────────────── */}
-        <div role="tabpanel" aria-label={`${selectedDay.full} schedule`}>
+        {/* ── Content ───────────────────────────────── */}
+        <div role="tabpanel">
           {isEmpty ? (
-            /* ── Empty timetable ──────────────────────────────── */
             <div className="tt-empty" role="status">
               <div className="tt-empty__icon tt-empty__icon--none">
                 <BookOpen size={24} />
               </div>
-              <h3 style={{ fontSize: '1rem' }}>No timetable entries</h3>
-              <p style={{ color: 'var(--text-secondary)', maxWidth: '38ch', fontSize: '0.88rem', lineHeight: 1.6 }}>
-                Your schedule will appear here once you join groups that have published their timetables.
+              <h3 style={{ fontSize: '1rem' }}>
+                No timetable entries
+              </h3>
+              <p
+                style={{
+                  color: 'var(--text-secondary)',
+                  maxWidth: '38ch',
+                  fontSize: '0.86rem',
+                  lineHeight: 1.6,
+                }}
+              >
+                Your schedule will appear here once you join groups
+                that have published their timetables.
               </p>
             </div>
           ) : scheduleView === 'calendar' ? (
-            /* ── Calendar View ────────────────────────────────── */
             <CalendarOverview
               eventsByDay={eventsByDay}
               todayIndex={todayIndex}
               onSelectDay={handleDaySelect}
             />
           ) : scheduleView === 'list' ? (
-            /* ── List View (all days) ─────────────────────────── */
             <div style={{ display: 'grid', gap: 24 }}>
               {WEEK_DAYS.map((day, idx) => {
                 const raw = eventsByDay.get(day.full) ?? [];
@@ -1216,16 +1517,24 @@ export function TimetablePage() {
                 const entries = enrichEntries(raw, idx);
 
                 return (
-                  <section key={day.short} style={{ display: 'grid', gap: 10 }} aria-label={`${day.full} classes`}>
+                  <section
+                    key={day.short}
+                    style={{ display: 'grid', gap: 10 }}
+                  >
                     <div className="tt-list-day-head">
                       <h2>{day.full}</h2>
-                      {idx === todayIndex && <Badge tone="warning">Today</Badge>}
+                      {idx === todayIndex && (
+                        <Badge tone="warning">Today</Badge>
+                      )}
                       <span className="muted">
-                        {entries.length} {entries.length === 1 ? 'class' : 'classes'}
+                        {entries.length}{' '}
+                        {entries.length === 1 ? 'class' : 'classes'}
                       </span>
                     </div>
 
-                    {idx === todayIndex && hasLiveClass && <NowIndicator />}
+                    {idx === todayIndex && hasLiveClass && (
+                      <NowIndicator />
+                    )}
 
                     {entries.map((e, i) => (
                       <ClassCard key={e.id} entry={e} index={i} />
@@ -1235,31 +1544,46 @@ export function TimetablePage() {
               })}
             </div>
           ) : (
-            /* ── Day View ─────────────────────────────────────── */
             <div style={{ display: 'grid', gap: 14 }}>
               {/* Day navigation */}
               <div className="tt-day-nav">
                 <button
-                  onClick={() => setSelectedDayIndex(Math.max(0, selectedDayIndex - 1))}
+                  onClick={() =>
+                    setSelectedDayIndex(
+                      Math.max(0, selectedDayIndex - 1),
+                    )
+                  }
                   className="icon-button"
                   aria-label="Previous day"
                   disabled={selectedDayIndex === 0}
-                  style={{ opacity: selectedDayIndex === 0 ? 0.3 : 1 }}
+                  style={{
+                    opacity: selectedDayIndex === 0 ? 0.3 : 1,
+                  }}
                 >
                   <ChevronLeft size={18} />
                 </button>
 
                 <div className="tt-day-nav__center">
-                  <h2 className="tt-day-nav__title">{selectedDay.full}</h2>
-                  {isToday && <span className="tt-day-nav__today">Today</span>}
+                  <h2 className="tt-day-nav__title">
+                    {selectedDay.full}
+                  </h2>
+                  {isToday && (
+                    <span className="tt-day-nav__today">Today</span>
+                  )}
                 </div>
 
                 <button
-                  onClick={() => setSelectedDayIndex(Math.min(6, selectedDayIndex + 1))}
+                  onClick={() =>
+                    setSelectedDayIndex(
+                      Math.min(6, selectedDayIndex + 1),
+                    )
+                  }
                   className="icon-button"
                   aria-label="Next day"
                   disabled={selectedDayIndex === 6}
-                  style={{ opacity: selectedDayIndex === 6 ? 0.3 : 1 }}
+                  style={{
+                    opacity: selectedDayIndex === 6 ? 0.3 : 1,
+                  }}
                 >
                   <ChevronRight size={18} />
                 </button>
@@ -1272,7 +1596,10 @@ export function TimetablePage() {
                   <DaySummary entries={dayEntries} />
                   {isToday && hasLiveClass && <NowIndicator />}
 
-                  <div style={{ display: 'grid', gap: 10 }} role="list" aria-label={`${selectedDay.full} classes`}>
+                  <div
+                    style={{ display: 'grid', gap: 10 }}
+                    role="list"
+                  >
                     {dayEntries.map((e, i) => (
                       <div key={e.id} role="listitem">
                         <ClassCard entry={e} index={i} />

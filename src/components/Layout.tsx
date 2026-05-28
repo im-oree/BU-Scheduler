@@ -16,14 +16,6 @@ import {
   Users,
   Sparkles,
   UserCircle,
-  BookOpen,
-  Clock,
-  ArrowUpRight,
-  Moon,
-  Sun,
-  HelpCircle,
-  Shield,
-  Keyboard,
 } from 'lucide-react';
 import {
   Link,
@@ -41,7 +33,6 @@ import {
   useCallback,
   useMemo,
   useState,
-  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { fetchUserGroups } from '../lib/studenthubData';
@@ -56,10 +47,6 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   badge?: number;
-}
-
-interface MobileTabItem extends NavItem {
-  isAction?: boolean;
 }
 
 interface GroupData {
@@ -84,14 +71,6 @@ const primaryNavItems: NavItem[] = [
 const secondaryNavItems: NavItem[] = [
   { to: '/notifications', label: 'Notifications', icon: Bell },
   { to: '/settings', label: 'Settings', icon: Settings2 },
-];
-
-const mobileTabs: MobileTabItem[] = [
-  { to: '/home', label: 'Home', icon: Home },
-  { to: '/timetable', label: 'Schedule', icon: CalendarDays },
-  { to: '/groups/new-event', label: 'New', icon: PlusCircle, isAction: true },
-  { to: '/groups', label: 'Groups', icon: Grid2x2 },
-  { to: '/settings', label: 'More', icon: Settings2 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -142,7 +121,6 @@ function resolveShellTitle(pathname: string): {
   title: string;
   subtitle: string;
 } {
-  // Check group-specific routes first
   if (pathname.startsWith('/groups/') && pathname !== '/groups') {
     for (const pattern of GROUP_ROUTE_PATTERNS) {
       if (pattern.test(pathname)) return pattern.result;
@@ -171,11 +149,25 @@ function getInitials(name?: string | null): string {
     .toUpperCase();
 }
 
-function getGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  return 'Good evening';
+// ---------------------------------------------------------------------------
+// Hook: detect desktop
+// ---------------------------------------------------------------------------
+
+function useIsDesktop(breakpoint = 1181) {
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia(`(min-width: ${breakpoint}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(`(min-width: ${breakpoint}px)`);
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [breakpoint]);
+
+  return isDesktop;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +181,6 @@ function SidebarOverlay({
   visible: boolean;
   onClose: () => void;
 }) {
-  // Prevent body scroll when overlay is visible
   useEffect(() => {
     if (visible) {
       document.body.style.overflow = 'hidden';
@@ -265,58 +256,6 @@ function SidebarNavLink({
 }
 
 // ---------------------------------------------------------------------------
-// Mobile Bottom Tab
-// ---------------------------------------------------------------------------
-
-function MobileTab({
-  to,
-  label,
-  icon: Icon,
-  isAction,
-  badge,
-}: MobileTabItem & { badge?: number }) {
-  return (
-    <NavLink
-      to={to}
-      className={({ isActive }) => {
-        if (isAction) return 'bottom-nav__item bottom-nav__item--action';
-        return isActive
-          ? 'bottom-nav__item bottom-nav__item--active'
-          : 'bottom-nav__item';
-      }}
-      aria-label={
-        badge && badge > 0 ? `${label}, ${badge} notifications` : label
-      }
-    >
-      <span style={{ position: 'relative', display: 'inline-flex' }}>
-        <Icon
-          size={isAction ? 22 : 20}
-          strokeWidth={isAction ? 2.4 : 2}
-          aria-hidden="true"
-        />
-        {badge !== undefined && badge > 0 && !isAction && (
-          <span
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              top: -3,
-              right: -6,
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: 'var(--danger)',
-              border: '2px solid var(--bg)',
-              animation: 'pulse-dot 2.5s ease-in-out infinite',
-            }}
-          />
-        )}
-      </span>
-      <span>{label}</span>
-    </NavLink>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Sidebar Group Card
 // ---------------------------------------------------------------------------
 
@@ -345,7 +284,7 @@ function SidebarGroupCard({
         icon: MessageCircle,
       },
     ],
-    [group.id]
+    [group.id],
   );
 
   return (
@@ -522,7 +461,6 @@ function AccountDropdown({
 }) {
   const menuRef = useRef<HTMLDetailsElement>(null);
 
-  // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -533,7 +471,6 @@ function AccountDropdown({
     return () => document.removeEventListener('click', handler, true);
   }, []);
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape' && menuRef.current?.open) {
@@ -550,7 +487,7 @@ function AccountDropdown({
       { to: '/settings', label: 'Settings', icon: Settings2 },
       { to: '/notifications', label: 'Notifications', icon: Bell },
     ],
-    []
+    [],
   );
 
   return (
@@ -571,8 +508,8 @@ function AccountDropdown({
           className="avatar avatar--tiny"
           style={{
             border: 'none',
-            background: 'var(--sienna-light)',
-            color: 'var(--sienna)',
+            background: 'var(--primary-soft, #F2F8E6)',
+            color: 'var(--tertiary, #5A8A00)',
           }}
           aria-hidden="true"
         >
@@ -582,7 +519,6 @@ function AccountDropdown({
       </summary>
 
       <div className="topbar__menu-panel" role="menu" aria-label="Account menu">
-        {/* User info header */}
         <div
           style={{
             padding: '14px 14px 10px',
@@ -601,7 +537,6 @@ function AccountDropdown({
           </span>
         </div>
 
-        {/* Nav links */}
         {menuItems.map((item) => (
           <Link key={item.to} to={item.to} role="menuitem">
             <item.icon size={16} aria-hidden="true" />
@@ -609,7 +544,6 @@ function AccountDropdown({
           </Link>
         ))}
 
-        {/* Divider + sign out */}
         <div
           style={{
             borderTop: '1px solid var(--line)',
@@ -661,7 +595,7 @@ function NotificationBell({ count }: { count: number }) {
             width: 9,
             height: 9,
             borderRadius: '50%',
-            background: 'var(--sage)',
+            background: 'var(--primary, #7CB518)',
             border: '2px solid var(--surface)',
             animation: 'pulse-dot 2.5s ease-in-out infinite',
           }}
@@ -678,7 +612,6 @@ function NotificationBell({ count }: { count: number }) {
 function TopbarSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Cmd/Ctrl + K shortcut
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -704,7 +637,7 @@ function TopbarSearch() {
         style={{
           padding: '2px 8px',
           borderRadius: 6,
-          background: 'var(--slate-light)',
+          background: 'var(--bg-muted)',
           border: '1px solid var(--line)',
           fontSize: '0.68rem',
           color: 'var(--muted)',
@@ -723,7 +656,10 @@ function TopbarSearch() {
 // Focus Trap Hook
 // ---------------------------------------------------------------------------
 
-function useFocusTrap(containerRef: React.RefObject<HTMLElement | null>, active: boolean) {
+function useFocusTrap(
+  containerRef: React.RefObject<HTMLElement | null>,
+  active: boolean,
+) {
   useEffect(() => {
     if (!active || !containerRef.current) return;
 
@@ -735,7 +671,7 @@ function useFocusTrap(containerRef: React.RefObject<HTMLElement | null>, active:
       if (e.key !== 'Tab') return;
 
       const focusable = Array.from(
-        container.querySelectorAll<HTMLElement>(focusableSelector)
+        container.querySelectorAll<HTMLElement>(focusableSelector),
       );
       if (focusable.length === 0) return;
 
@@ -757,8 +693,8 @@ function useFocusTrap(containerRef: React.RefObject<HTMLElement | null>, active:
 
     container.addEventListener('keydown', handleKeyDown);
 
-    // Focus the first focusable element
-    const firstFocusable = container.querySelector<HTMLElement>(focusableSelector);
+    const firstFocusable =
+      container.querySelector<HTMLElement>(focusableSelector);
     firstFocusable?.focus();
 
     return () => container.removeEventListener('keydown', handleKeyDown);
@@ -789,10 +725,10 @@ function useEscapeKey(callback: () => void, active: boolean) {
 export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
+  const isDesktop = useIsDesktop(1181);
 
   // --- Store ---
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
-  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const closeSidebar = useAppStore((s) => s.closeSidebar);
   const selectedGroupId = useAppStore((s) => s.selectedGroupId);
 
@@ -814,7 +750,7 @@ export function AppShell() {
 
   const sidebarGroups: GroupData[] = useMemo(
     () => groupsQuery.data ?? [],
-    [groupsQuery.data]
+    [groupsQuery.data],
   );
 
   const currentGroup = useMemo(
@@ -822,40 +758,38 @@ export function AppShell() {
       sidebarGroups.find((g) => g.id === selectedGroupId) ??
       sidebarGroups[0] ??
       null,
-    [sidebarGroups, selectedGroupId]
+    [sidebarGroups, selectedGroupId],
   );
 
-  // Notification count — in a real app this would come from a query
   const notificationCount = 3;
 
   // --- Derived ---
   const { title: shellTitle, subtitle: shellSubtitle } = useMemo(
     () => resolveShellTitle(location.pathname),
-    [location.pathname]
+    [location.pathname],
   );
 
   const userName = session?.user.displayName ?? 'Student';
   const userEmail = session?.user.email ?? 'student@bu.edu';
-  const initials = useMemo(() => getInitials(session?.user.displayName), [session?.user.displayName]);
+  const initials = useMemo(
+    () => getInitials(session?.user.displayName),
+    [session?.user.displayName],
+  );
 
   // --- Effects ---
 
-  // Auto-select first group if none selected
   useEffect(() => {
     if (!selectedGroupId && sidebarGroups[0]) {
       useAppStore.getState().setSelectedGroupId(sidebarGroups[0].id);
     }
   }, [selectedGroupId, sidebarGroups]);
 
-  // Close sidebar on route change (mobile)
   useEffect(() => {
     closeSidebar();
   }, [location.pathname, closeSidebar]);
 
-  // Focus trap for sidebar when open
   useFocusTrap(sidebarRef, sidebarOpen);
 
-  // Escape to close sidebar
   useEscapeKey(closeSidebar, sidebarOpen);
 
   // --- Handlers ---
@@ -870,7 +804,6 @@ export function AppShell() {
     closeSidebar();
   }, [closeSidebar]);
 
-  // --- New event link ---
   const newEventLink = currentGroup
     ? `/groups/${currentGroup.id}/events/new`
     : '/groups';
@@ -878,201 +811,190 @@ export function AppShell() {
   return (
     <div className="app-shell">
       {/* ═══════════════════════════════════════════════════════
-          SIDEBAR OVERLAY (mobile)
+          SIDEBAR OVERLAY (mobile) — only relevant on desktop now,
+          since mobile uses BottomNav. Kept for completeness if
+          sidebar is ever toggled on smaller screens.
           ═══════════════════════════════════════════════════════ */}
       <SidebarOverlay visible={sidebarOpen} onClose={handleSidebarClose} />
 
       {/* ═══════════════════════════════════════════════════════
-          SIDEBAR
+          SIDEBAR (desktop only)
           ═══════════════════════════════════════════════════════ */}
-      <aside
-        ref={sidebarRef}
-        className={sidebarOpen ? 'sidebar sidebar--open' : 'sidebar'}
-        aria-label="Main navigation"
-        aria-hidden={!sidebarOpen ? undefined : undefined}
-      >
-        {/* ── Brand ── */}
-        <div className="sidebar__brand">
-          <Link
-            to="/home"
-            className="brand-link"
-            onClick={handleSidebarClose}
-            aria-label="StudentHub — Go to dashboard"
-          >
-            <span className="brand-link__mark" aria-hidden="true">
-              S
-            </span>
-            <span>
-              <strong>StudentHub</strong>
-              <small>Timetable workspace</small>
-            </span>
-          </Link>
-
-          <button
-            type="button"
-            className="icon-button mobile-only"
-            aria-label="Close navigation"
-            onClick={handleSidebarClose}
-            style={{ marginLeft: 'auto' }}
-          >
-            <X size={18} aria-hidden="true" />
-          </button>
-        </div>
-
-        {/* ── Primary Nav ── */}
-        <nav className="sidebar__nav" aria-label="Primary navigation">
-          <p className="sidebar__label" id="nav-primary-label">
-            Navigation
-          </p>
-          <div role="list" aria-labelledby="nav-primary-label">
-            {primaryNavItems.map((item) => (
-              <div role="listitem" key={item.to}>
-                <SidebarNavLink
-                  {...item}
-                  badge={item.to === '/notifications' ? notificationCount : undefined}
-                  onClick={handleSidebarClose}
-                />
-              </div>
-            ))}
+      {isDesktop && (
+        <aside
+          ref={sidebarRef}
+          className={sidebarOpen ? 'sidebar sidebar--open' : 'sidebar'}
+          aria-label="Main navigation"
+        >
+          {/* ── Brand ── */}
+          <div className="sidebar__brand">
+            <Link
+              to="/home"
+              className="brand-link"
+              onClick={handleSidebarClose}
+              aria-label="StudentHub — Go to dashboard"
+            >
+              <span className="brand-link__mark" aria-hidden="true">
+                S
+              </span>
+              <span>
+                <strong>StudentHub</strong>
+                <small>Timetable workspace</small>
+              </span>
+            </Link>
           </div>
 
-          <p
-            className="sidebar__label"
-            id="nav-secondary-label"
-            style={{ marginTop: 8 }}
-          >
-            System
-          </p>
-          <div role="list" aria-labelledby="nav-secondary-label">
-            {secondaryNavItems.map((item) => (
-              <div role="listitem" key={item.to}>
-                <SidebarNavLink
-                  {...item}
-                  badge={
-                    item.to === '/notifications' ? notificationCount : undefined
-                  }
-                  onClick={handleSidebarClose}
-                />
-              </div>
-            ))}
-          </div>
-        </nav>
+          {/* ── Primary Nav ── */}
+          <nav className="sidebar__nav" aria-label="Primary navigation">
+            <p className="sidebar__label" id="nav-primary-label">
+              Navigation
+            </p>
+            <div role="list" aria-labelledby="nav-primary-label">
+              {primaryNavItems.map((item) => (
+                <div role="listitem" key={item.to}>
+                  <SidebarNavLink
+                    {...item}
+                    badge={
+                      item.to === '/notifications'
+                        ? notificationCount
+                        : undefined
+                    }
+                    onClick={handleSidebarClose}
+                  />
+                </div>
+              ))}
+            </div>
 
-        {/* ── Current Group Context ── */}
-        {currentGroup && (
+            <p
+              className="sidebar__label"
+              id="nav-secondary-label"
+              style={{ marginTop: 8 }}
+            >
+              System
+            </p>
+            <div role="list" aria-labelledby="nav-secondary-label">
+              {secondaryNavItems.map((item) => (
+                <div role="listitem" key={item.to}>
+                  <SidebarNavLink
+                    {...item}
+                    badge={
+                      item.to === '/notifications'
+                        ? notificationCount
+                        : undefined
+                    }
+                    onClick={handleSidebarClose}
+                  />
+                </div>
+              ))}
+            </div>
+          </nav>
+
+          {/* ── Current Group Context ── */}
+          {currentGroup && (
+            <div className="sidebar__section">
+              <p className="sidebar__label">Current group</p>
+              <SidebarGroupCard
+                group={currentGroup}
+                onClose={handleSidebarClose}
+              />
+            </div>
+          )}
+
+          {/* ── Recent Groups ── */}
           <div className="sidebar__section">
-            <p className="sidebar__label">Current group</p>
-            <SidebarGroupCard
-              group={currentGroup}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <p className="sidebar__label" style={{ margin: 0 }}>
+                Recent groups
+              </p>
+              {sidebarGroups.length > 4 && (
+                <Link
+                  to="/groups"
+                  onClick={handleSidebarClose}
+                  className="inline-link"
+                  style={{ fontSize: '0.72rem' }}
+                >
+                  All
+                  <ChevronRight size={12} aria-hidden="true" />
+                </Link>
+              )}
+            </div>
+            <SidebarRecentGroups
+              groups={sidebarGroups}
               onClose={handleSidebarClose}
             />
           </div>
-        )}
 
-        {/* ── Recent Groups ── */}
-        <div className="sidebar__section">
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <p className="sidebar__label" style={{ margin: 0 }}>
-              Recent groups
-            </p>
-            {sidebarGroups.length > 4 && (
-              <Link
-                to="/groups"
-                onClick={handleSidebarClose}
-                className="inline-link"
-                style={{ fontSize: '0.72rem' }}
-              >
-                All
-                <ChevronRight size={12} aria-hidden="true" />
-              </Link>
-            )}
-          </div>
-          <SidebarRecentGroups
-            groups={sidebarGroups}
-            onClose={handleSidebarClose}
+          {/* ── Profile Footer ── */}
+          <SidebarProfile
+            name={userName}
+            email={userEmail}
+            initials={initials}
           />
-        </div>
-
-        {/* ── Profile Footer ── */}
-        <SidebarProfile name={userName} email={userEmail} initials={initials} />
-      </aside>
+        </aside>
+      )}
 
       {/* ═══════════════════════════════════════════════════════
           MAIN CONTENT AREA
           ═══════════════════════════════════════════════════════ */}
       <div className="app-shell__content">
-        {/* ── Top Bar ── */}
-        <header className="topbar" role="banner">
-          <div className="topbar__left">
-            {/* Mobile menu toggle */}
-            <button
-              type="button"
-              className="icon-button mobile-only"
-              aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'}
-              aria-expanded={sidebarOpen}
-              aria-controls="sidebar"
-              onClick={toggleSidebar}
-            >
-              {sidebarOpen ? (
-                <X size={18} aria-hidden="true" />
-              ) : (
-                <Menu size={18} aria-hidden="true" />
-              )}
-            </button>
-
-            {/* Brand + Title */}
-            <Link
-              to="/home"
-              className="topbar__brand"
-              aria-label="StudentHub — Go to dashboard"
-            >
-              <span
-                className="brand-link__mark brand-link__mark--small"
-                aria-hidden="true"
+        {/* ── Top Bar (desktop only) ── */}
+        {isDesktop && (
+          <header className="topbar" role="banner">
+            <div className="topbar__left">
+              {/* Brand + Title */}
+              <Link
+                to="/home"
+                className="topbar__brand"
+                aria-label="StudentHub — Go to dashboard"
               >
-                S
-              </span>
-              <span className="topbar__title-group">
-                <strong>{shellTitle}</strong>
-                <small>{shellSubtitle}</small>
-              </span>
-            </Link>
-          </div>
+                <span
+                  className="brand-link__mark brand-link__mark--small"
+                  aria-hidden="true"
+                >
+                  S
+                </span>
+                <span className="topbar__title-group">
+                  <strong>{shellTitle}</strong>
+                  <small>{shellSubtitle}</small>
+                </span>
+              </Link>
+            </div>
 
-          {/* Search */}
-          <TopbarSearch />
+            {/* Search */}
+            <TopbarSearch />
 
-          {/* Right actions */}
-          <div className="topbar__meta">
-            {/* Quick add button */}
-            <Link
-              to={newEventLink}
-              className="button button--primary button--sm topbar__action"
-              style={{ gap: 8 }}
-              aria-label="Add new class"
-            >
-              <PlusCircle size={16} aria-hidden="true" />
-              <span>Add class</span>
-            </Link>
+            {/* Right actions */}
+            <div className="topbar__meta">
+              {/* Quick add button */}
+              <Link
+                to={newEventLink}
+                className="button button--primary button--sm topbar__action"
+                style={{ gap: 8 }}
+                aria-label="Add new class"
+              >
+                <PlusCircle size={16} aria-hidden="true" />
+                <span>Add class</span>
+              </Link>
 
-            {/* Notifications */}
-            <NotificationBell count={notificationCount} />
+              {/* Notifications */}
+              <NotificationBell count={notificationCount} />
 
-            {/* Account dropdown */}
-            <AccountDropdown
-              name={userName}
-              email={userEmail}
-              initials={initials}
-              onSignOut={handleSignOut}
-            />
-          </div>
-        </header>
+              {/* Account dropdown */}
+              <AccountDropdown
+                name={userName}
+                email={userEmail}
+                initials={initials}
+                onSignOut={handleSignOut}
+              />
+            </div>
+          </header>
+        )}
 
         {/* ── Page Content ── */}
         <main className="app-main" id="main-content">
@@ -1081,24 +1003,9 @@ export function AppShell() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════
-          BOTTOM NAVIGATION (mobile)
+          BOTTOM NAVIGATION (mobile only — handled inside BottomNav)
           ═══════════════════════════════════════════════════════ */}
-      <nav
-        className="bottom-nav mobile-only"
-        aria-label="Mobile navigation"
-        role="navigation"
-      >
-        {mobileTabs.map((tab) => (
-          <MobileTab
-            key={tab.to}
-            to={tab.to}
-            label={tab.label}
-            icon={tab.icon}
-            isAction={tab.isAction}
-            badge={tab.to === '/notifications' ? notificationCount : undefined}
-          />
-        ))}
-      </nav>
+      <BottomNav />
     </div>
   );
 }
