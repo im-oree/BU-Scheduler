@@ -1492,10 +1492,31 @@
     align-items: flex-start;
     gap: 14px;
     flex-wrap: wrap;
+    overflow: visible;
   }
 
-  .timeline-card__left  { display: grid; gap: 7px; }
-  .timeline-card__right { display: grid; gap: 5px; text-align: right; }
+  .timeline-card__left  {
+    display: grid;
+    gap: 7px;
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+
+  .timeline-card__right {
+    display: grid;
+    gap: 5px;
+    text-align: right;
+    flex: 0 0 auto;
+  }
+
+  .timeline-card__actions {
+    position: relative;
+    margin-left: auto;
+    display: flex;
+    align-items: flex-start;
+    flex: 0 0 auto;
+    z-index: 2;
+  }
 
   /* Vertical timeline line */
   .timeline-list::before {

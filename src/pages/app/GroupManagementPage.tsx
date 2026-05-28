@@ -1253,6 +1253,7 @@ export function GroupManagementPage() {
                         style={{
                           opacity: isCancelled ? 0.6 : 1,
                           position: 'relative',
+                          overflow: 'visible',
                         }}
                       >
                         <div className="timeline-card__left">
@@ -1292,13 +1293,7 @@ export function GroupManagementPage() {
                         </div>
 
                         {/* Actions menu */}
-                        <div
-                          style={{
-                            position: 'absolute',
-                            top: 8,
-                            right: 8,
-                          }}
-                        >
+                        <div className="timeline-card__actions">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1318,9 +1313,9 @@ export function GroupManagementPage() {
                               style={{
                                 position: 'absolute',
                                 right: 0,
-                                top: 32,
+                                top: 40,
                                 minWidth: 180,
-                                zIndex: 10,
+                                zIndex: 20,
                                 padding: 4,
                               }}
                             >
