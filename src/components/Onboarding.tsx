@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useAuthStore } from '../store/useAuthStore';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 type Step = {
@@ -352,13 +353,15 @@ export function Onboarding({ steps = DEFAULT_STEPS }: { steps?: Step[] }) {
     ensureStyles();
   }, []);
 
+  const status = useAuthStore((s) => s.status);
+
   useEffect(() => {
     const dismissed = window.localStorage.getItem('onboarding.dismissed');
-    if (!dismissed) {
+    if (!dismissed && status === 'authenticated') {
       const t = setTimeout(() => setVisible(true), 500);
       return () => clearTimeout(t);
     }
-  }, []);
+  }, [status]);
 
   useEffect(() => {
     if (navigating) {

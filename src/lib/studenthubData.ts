@@ -16,7 +16,7 @@ import {
   addDoc,
 } from 'firebase/firestore';
 import { getFirebaseDb } from './firebase';
-import { withCachedValue } from './offlineCache';
+import { clearCachedValuesByPrefix, withCachedValue } from './offlineCache';
 
 export type StudentHubGroup = {
   id: string;
@@ -125,6 +125,10 @@ function db() {
 
 function cacheKey(...parts: string[]) {
   return ['studenthub', ...parts].join(':');
+}
+
+async function clearStudentHubCaches(...prefixes: string[]) {
+  await Promise.all(prefixes.map((prefix) => clearCachedValuesByPrefix(prefix)));
 }
 
 function asText(value: unknown, fallback = '') {
@@ -541,6 +545,19 @@ export async function joinGroup(groupId: string, profile: StudentHubProfile, use
     { merge: true },
   );
 
+  await clearStudentHubCaches(
+    cacheKey('all-groups'),
+    cacheKey('group-document', groupId),
+    cacheKey('group-by-id', groupId),
+    cacheKey('group-members', groupId),
+    cacheKey('group-announcements', groupId),
+    cacheKey('group-chat', groupId),
+    cacheKey('group-timetable', groupId),
+    cacheKey('user-groups', userId),
+    cacheKey('user-timetable', userId),
+    cacheKey('profile', userId),
+  );
+
   return { alreadyJoined: false };
 }
 
@@ -598,6 +615,19 @@ export async function leaveGroup(groupId: string, userId: string) {
     });
   }
 
+  await clearStudentHubCaches(
+    cacheKey('all-groups'),
+    cacheKey('group-document', groupId),
+    cacheKey('group-by-id', groupId),
+    cacheKey('group-members', groupId),
+    cacheKey('group-announcements', groupId),
+    cacheKey('group-chat', groupId),
+    cacheKey('group-timetable', groupId),
+    cacheKey('user-groups', userId),
+    cacheKey('user-timetable', userId),
+    cacheKey('profile', userId),
+  );
+
   return { success: true };
 }
 
@@ -625,6 +655,14 @@ export async function demoteRep(groupId: string, memberId: string) {
       updatedAt: serverTimestamp(),
     });
   }
+
+  await clearStudentHubCaches(
+    cacheKey('all-groups'),
+    cacheKey('group-document', groupId),
+    cacheKey('group-by-id', groupId),
+    cacheKey('group-members', groupId),
+    cacheKey('profile', memberId),
+  );
 
   return { success: true };
 }
@@ -670,6 +708,12 @@ export async function sendGroupChatMessage(params: {
       updatedAt: serverTimestamp(),
     },
     { merge: true },
+  );
+
+  await clearStudentHubCaches(
+    cacheKey('group-chat', groupId),
+    cacheKey('group-document', groupId),
+    cacheKey('group-by-id', groupId),
   );
 
   return payload;
@@ -857,6 +901,11 @@ export async function createGroupAnnouncement(params: {
 
   try {
     const docRef = await addDoc(announcementRef, payload);
+    await clearStudentHubCaches(
+      cacheKey('group-announcements', groupId),
+      cacheKey('group-document', groupId),
+      cacheKey('group-by-id', groupId),
+    );
     return { success: true, id: docRef.id, ...payload };
   } catch (err) {
     console.error('[studenthubData] createGroupAnnouncement failed:', err);
@@ -960,143 +1009,155 @@ export async function fetchNotifications(userId: string): Promise<StudentHubNoti
 export async function fetchUserTimetableEntries(userId: string): Promise<StudentHubTimetableEntry[]> {
   console.log('[studenthubData] fetchUserTimetableEntries userId:', userId);
 
-  const trySource = async (
-    label: string,
-    loader: () => Promise<StudentHubTimetableEntry[]>,
-  ): Promise<StudentHubTimetableEntry[] | null> => {
-    try {
-      const entries = await loader();
-      if (entries.length > 0) {
-        console.log(`[studenthubData] ${label} entries:`, entries.length);
-        return sortByDateAsc(entries);
+  return withCachedValue({
+    key: cacheKey('user-timetable', userId),
+    fallback: [],
+    loader: async () => {
+      const trySource = async (
+        label: string,
+        loader: () => Promise<StudentHubTimetableEntry[]>,
+      ): Promise<StudentHubTimetableEntry[] | null> => {
+        try {
+          const entries = await loader();
+          if (entries.length > 0) {
+            console.log(`[studenthubData] ${label} entries:`, entries.length);
+            return sortByDateAsc(entries);
+          }
+
+          console.log(`[studenthubData] ${label} entries: 0`);
+          return null;
+        } catch (error) {
+          console.error(`[studenthubData] ${label} failed:`, error);
+          return null;
+        }
+      };
+
+      // 1. Primary: flat timetable collection with userId field
+      const flatEntries = await trySource('flat timetable', async () => {
+        const flatSnap = await getDocs(
+          query(collection(db(), 'timetable'), where('userId', '==', userId), limit(500)),
+        );
+
+        return flatSnap.docs.map((d) => mapTimetableEntry(d.id, d.data() as Record<string, unknown>));
+      });
+      if (flatEntries) return flatEntries;
+
+      // 2. Fallback: nested timetables/{userId} doc (legacy shape)
+      const nestedEntries = await trySource('nested timetable', async () => {
+        const nestedSnap = await getDoc(doc(db(), 'timetables', userId));
+        if (!nestedSnap.exists()) return [];
+
+        const data = nestedSnap.data() as Record<string, unknown>;
+        return extractStructuredTimetableEntries(nestedSnap.id, data, userId);
+      });
+      if (nestedEntries) return nestedEntries;
+
+      const [profile, groups] = await Promise.all([
+        fetchCurrentUserProfile(userId).catch(() => null),
+        fetchUserGroups(userId).catch(() => []),
+      ]);
+
+      const level = profile?.studyLevel || profile?.level || profile?.course || '';
+
+      // 3. Level schedule collection (schedule queried by level)
+      if (level) {
+        const scheduleEntries = await trySource('level schedule', async () => {
+          const scheduleSnap = await getDocs(
+            query(collection(db(), 'schedule'), where('level', '==', level), limit(500)),
+          );
+
+          return scheduleSnap.docs.map((d) => {
+            const data = d.data() as Record<string, unknown>;
+            return {
+              id: d.id,
+              userId,
+              courseCode: asText(data.courseCode, '—'),
+              courseName: asText(data.courseName ?? data.className, 'Untitled class'),
+              dayIndex: normalizeDayIndex(data.dayIndex ?? data.dayIndexOfWeek ?? data.day),
+              day: asText(data.dayOfWeek ?? data.day, '—'),
+              startTime: asText(data.startTime, ''),
+              endTime: asText(data.endTime, ''),
+              venue: asText(data.venue ?? data.location ?? data.building, 'TBA'),
+              instructor: asText(data.instructor, 'TBA'),
+              groupName: asText(data.groupName ?? data.groupId ?? level, ''),
+            } satisfies StudentHubTimetableEntry;
+          });
+        });
+        if (scheduleEntries) return scheduleEntries;
       }
 
-      console.log(`[studenthubData] ${label} entries: 0`);
-      return null;
-    } catch (error) {
-      console.error(`[studenthubData] ${label} failed:`, error);
-      return null;
-    }
-  };
+      // 4. Last resort: derive from the user's group timetables
+      console.log('[studenthubData] falling back to groupTimetables');
+      if (groups.length === 0) return [];
 
-  // 1. Primary: flat timetable collection with userId field
-  const flatEntries = await trySource('flat timetable', async () => {
-    const flatSnap = await getDocs(
-      query(collection(db(), 'timetable'), where('userId', '==', userId), limit(500)),
-    );
+      const groupEntries = await trySource('group timetable fallback', async () => {
+        const snaps = await Promise.all(
+          groups.map((g) =>
+            getDocs(query(collection(db(), 'groupTimetables'), where('groupId', '==', g.id), limit(500))),
+          ),
+        );
 
-    return flatSnap.docs.map((d) => mapTimetableEntry(d.id, d.data() as Record<string, unknown>));
-  });
-  if (flatEntries) return flatEntries;
-
-  // 2. Fallback: nested timetables/{userId} doc (legacy shape)
-  const nestedEntries = await trySource('nested timetable', async () => {
-    const nestedSnap = await getDoc(doc(db(), 'timetables', userId));
-    if (!nestedSnap.exists()) return [];
-
-    const data = nestedSnap.data() as Record<string, unknown>;
-    return extractStructuredTimetableEntries(nestedSnap.id, data, userId);
-  });
-  if (nestedEntries) return nestedEntries;
-
-  const [profile, groups] = await Promise.all([
-    fetchCurrentUserProfile(userId).catch(() => null),
-    fetchUserGroups(userId).catch(() => []),
-  ]);
-
-  const level = profile?.studyLevel || profile?.level || profile?.course || '';
-
-  // 3. Level schedule collection (schedule queried by level)
-  if (level) {
-    const scheduleEntries = await trySource('level schedule', async () => {
-      const scheduleSnap = await getDocs(
-        query(collection(db(), 'schedule'), where('level', '==', level), limit(500)),
-      );
-
-      return scheduleSnap.docs.map((d) => {
-        const data = d.data() as Record<string, unknown>;
-        return {
-          id: d.id,
-          userId,
-          courseCode: asText(data.courseCode, '—'),
-          courseName: asText(data.courseName ?? data.className, 'Untitled class'),
-          dayIndex: normalizeDayIndex(data.dayIndex ?? data.dayIndexOfWeek ?? data.day),
-          day: asText(data.dayOfWeek ?? data.day, '—'),
-          startTime: asText(data.startTime, ''),
-          endTime: asText(data.endTime, ''),
-          venue: asText(data.venue ?? data.location ?? data.building, 'TBA'),
-          instructor: asText(data.instructor, 'TBA'),
-          groupName: asText(data.groupName ?? data.groupId ?? level, ''),
-        } satisfies StudentHubTimetableEntry;
-      });
-    });
-    if (scheduleEntries) return scheduleEntries;
-  }
-
-  // 4. Last resort: derive from the user's group timetables
-  console.log('[studenthubData] falling back to groupTimetables');
-  if (groups.length === 0) return [];
-
-  const groupEntries = await trySource('group timetable fallback', async () => {
-    const snaps = await Promise.all(
-      groups.map((g) =>
-        getDocs(query(collection(db(), 'groupTimetables'), where('groupId', '==', g.id), limit(500))),
-      ),
-    );
-
-    const entries: StudentHubTimetableEntry[] = [];
-    snaps.forEach((snapshot, idx) => {
-      const gid = groups[idx].id;
-      snapshot.docs.forEach((d) => {
-        const data = d.data() as Record<string, unknown>;
-        entries.push({
-          id: d.id,
-          userId,
-          groupId: gid,
-          courseCode: asText(data.courseCode, '—'),
-          courseName: asText(data.className ?? data.courseName, 'Untitled class'),
-          dayIndex: normalizeDayIndex(data.dayIndex ?? data.dayIndexOfWeek ?? data.day),
-          day: asText(data.dayOfWeek ?? data.day, '—'),
-          startTime: asText(data.startTime, ''),
-          endTime: asText(data.endTime, ''),
-          venue: asText(data.venue ?? data.location ?? data.building, 'TBA'),
-          instructor: asText(data.instructor, 'TBA'),
-          groupName: gid,
+        const entries: StudentHubTimetableEntry[] = [];
+        snaps.forEach((snapshot, idx) => {
+          const gid = groups[idx].id;
+          snapshot.docs.forEach((d) => {
+            const data = d.data() as Record<string, unknown>;
+            entries.push({
+              id: d.id,
+              userId,
+              groupId: gid,
+              courseCode: asText(data.courseCode, '—'),
+              courseName: asText(data.className ?? data.courseName, 'Untitled class'),
+              dayIndex: normalizeDayIndex(data.dayIndex ?? data.dayIndexOfWeek ?? data.day),
+              day: asText(data.dayOfWeek ?? data.day, '—'),
+              startTime: asText(data.startTime, ''),
+              endTime: asText(data.endTime, ''),
+              venue: asText(data.venue ?? data.location ?? data.building, 'TBA'),
+              instructor: asText(data.instructor, 'TBA'),
+              groupName: gid,
+            });
+          });
         });
+
+        return entries;
       });
-    });
 
-    return entries;
+      return groupEntries ?? [];
+    },
   });
-
-  return groupEntries ?? [];
 }
 
 export async function fetchGroupTimetableEntries(groupId: string): Promise<StudentHubTimetableEntry[]> {
   console.log('[studenthubData] fetchGroupTimetableEntries groupId:', groupId);
 
-  const snap = await getDocs(
-    query(collection(db(), 'groupTimetables'), where('groupId', '==', groupId), limit(100)),
-  );
+  return withCachedValue({
+    key: cacheKey('group-timetable', groupId),
+    fallback: [],
+    loader: async () => {
+      const snap = await getDocs(
+        query(collection(db(), 'groupTimetables'), where('groupId', '==', groupId), limit(100)),
+      );
 
-  return sortByDateAsc(
-    snap.docs.map((d) => {
-      const data = d.data() as Record<string, unknown>;
-      return {
-        id: d.id,
-        groupId,
-        courseCode: asText(data.courseCode, '—'),
-        courseName: asText(data.className ?? data.courseName, 'Untitled class'),
-        dayIndex: normalizeDayIndex(data.dayIndex ?? data.dayIndexOfWeek ?? data.day),
-        day: asText(data.dayOfWeek ?? data.day, '—'),
-        startTime: asText(data.startTime, ''),
-        endTime: asText(data.endTime, ''),
-        venue: asText(data.venue ?? data.location ?? data.building, 'TBA'),
-        instructor: asText(data.instructor, 'TBA'),
-        groupName: groupId,
-      } satisfies StudentHubTimetableEntry;
-    }),
-  );
+      return sortByDateAsc(
+        snap.docs.map((d) => {
+          const data = d.data() as Record<string, unknown>;
+          return {
+            id: d.id,
+            groupId,
+            courseCode: asText(data.courseCode, '—'),
+            courseName: asText(data.className ?? data.courseName, 'Untitled class'),
+            dayIndex: normalizeDayIndex(data.dayIndex ?? data.dayIndexOfWeek ?? data.day),
+            day: asText(data.dayOfWeek ?? data.day, '—'),
+            startTime: asText(data.startTime, ''),
+            endTime: asText(data.endTime, ''),
+            venue: asText(data.venue ?? data.location ?? data.building, 'TBA'),
+            instructor: asText(data.instructor, 'TBA'),
+            groupName: groupId,
+          } satisfies StudentHubTimetableEntry;
+        }),
+      );
+    },
+  });
 }
 
 /**

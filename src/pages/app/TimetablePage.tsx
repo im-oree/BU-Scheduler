@@ -1321,6 +1321,7 @@ export function TimetablePage() {
   const scheduleView = useAppStore((s) => s.scheduleView);
   const setScheduleView = useAppStore((s) => s.setScheduleView);
   const userId = useAuthStore((s) => s.session?.user.uid);
+  const isAuthenticated = useAuthStore((s) => s.status === 'authenticated');
 
   const [selectedDayIndex, setSelectedDayIndex] = useState(getTodayIndex);
 
@@ -1499,8 +1500,9 @@ export function TimetablePage() {
                   lineHeight: 1.6,
                 }}
               >
-                Your schedule will appear here once you join groups
-                that have published their timetables.
+                {isAuthenticated
+                  ? 'Your schedule will appear here once you join groups that have published their timetables.'
+                  : 'Sign in to view your timetable and join groups.'}
               </p>
             </div>
           ) : scheduleView === 'calendar' ? (

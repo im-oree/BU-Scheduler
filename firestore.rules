@@ -1,0 +1,861 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isUserOwner(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function isVerifiedSeller(uid) {
+      let sellerDoc = get(/databases/$(database)/documents/sellers/$(uid));
+      return sellerDoc.exists && sellerDoc.data.verified == true;
+    }
+
+    function isMessageOwner() {
+      return isAuthenticated() && 
+             request.auth.uid == resource.data.userId;
+    }
+
+    function isGroupMemberFromResource() {
+      return request.auth.uid in resource.data.get("members", {});
+    }
+
+    function isGroupRepFromResource() {
+      return request.auth.uid in resource.data.get("groupReps", []);
+    }
+
+    function isMemberOfGroup(groupId) {
+      let groupData = get(/databases/$(database)/documents/courseGroups/$(groupId)).data;
+      return isAuthenticated() && request.auth.uid in groupData.get("members", {});
+    }
+
+    function isAdminOfGroup(groupId) {
+      let groupData = get(/databases/$(database)/documents/courseGroups/$(groupId)).data;
+      return isAuthenticated() && request.auth.uid in groupData.get("groupReps", []);
+    }
+
+    function isMemberOfGroupByClassId(classId) {
+      let classData = get(/databases/$(database)/documents/groupTimetables/$(classId)).data;
+      return isMemberOfGroup(classData.groupId);
+    }
+
+    function isAdminOfGroupByClassId(classId) {
+      let classData = get(/databases/$(database)/documents/groupTimetables/$(classId)).data;
+      return isAdminOfGroup(classData.groupId);
+    }
+
+    function isMemberOfGroupByScheduleId(scheduleId) {
+      let scheduleData = get(/databases/$(database)/documents/groupSchedules/$(scheduleId)).data;
+      return isMemberOfGroup(scheduleData.groupId);
+    }
+
+    function isAdminOfGroupByScheduleId(scheduleId) {
+      let scheduleData = get(/databases/$(database)/documents/groupSchedules/$(scheduleId)).data;
+      return isAdminOfGroup(scheduleData.groupId);
+    }
+
+    function isCoursRep() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/levelCourseReps/$(request.auth.uid));
+    }
+
+    function isGroupRep() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/levelGroupReps/$(request.auth.uid));
+    }
+
+    function isEnrolledInSession(sessionId) {
+      let sessionData = get(/databases/$(database)/documents/courseSessions/$(sessionId)).data;
+      return isAuthenticated() && request.auth.uid in sessionData.get("enrolled", {});
+    }
+
+    function isUser(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function hasThreadsProfileReady() {
+      let userData = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return isAuthenticated() &&
+             userData.threadUsername is string &&
+             userData.threadUsername.size() >= 3 &&
+             userData.photoURL is string &&
+             userData.photoURL.size() > 0;
+    }
+    
+    // ============================================
+    // MISSING ID CARDS COLLECTION
+    // ============================================
+    match /missingIdCards/{postId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.finderId || isAdmin());
+    }
+
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
+    
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if request.auth.uid == userId;
+      
+      // Allow users and admins to update, with specific field restrictions for users
+      allow update: if request.auth.uid == userId || isAdmin();
+      allow write: if request.auth.uid == userId || isAdmin();
+
+      // ============================================
+      // USER REWARD SUBCOLLECTIONS
+      // ============================================
+
+      // Points Transactions - audit log for all point transactions
+      match /pointsTransactions/{transactionId} {
+        allow read: if request.auth.uid == userId || isAdmin();
+        allow create: if request.auth.uid == userId || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+
+      // Daily Activity Rewards - tracks when users earned rewards
+      match /dailyActivityRewards/{rewardId} {
+        allow read: if request.auth.uid == userId || isAdmin();
+        allow create: if request.auth.uid == userId || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+
+      // Quiz Rewards - tracks quiz completion points
+      match /quizRewards/{rewardId} {
+        allow read: if request.auth.uid == userId || isAdmin();
+        allow create: if request.auth.uid == userId || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+
+      // Cafeteria Visit Rewards - tracks cafeteria check-in points
+      match /cafeteriaRewards/{rewardId} {
+        allow read: if request.auth.uid == userId || isAdmin();
+        allow create: if request.auth.uid == userId || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+
+      // Chapel/Sabbath Visit Rewards - tracks chapel visit points
+      match /chapelRewards/{rewardId} {
+        allow read: if request.auth.uid == userId || isAdmin();
+        allow create: if request.auth.uid == userId || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+
+      // Buddy AI Usage Rewards - tracks AI assistant points
+      match /buddyAIRewards/{rewardId} {
+        allow read: if request.auth.uid == userId || isAdmin();
+        allow create: if request.auth.uid == userId || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+
+      // Chat Rewards - tracks chat activity points
+      match /chatRewards/{rewardId} {
+        allow read: if request.auth.uid == userId || isAdmin();
+        allow create: if request.auth.uid == userId || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // ============================================
+    // SELLERS COLLECTION
+    // ============================================
+    
+    match /sellers/{sellerId} {
+      // Authenticated users can view seller profiles
+      allow read: if isAuthenticated();
+      
+      // Sellers can update their own profile (except verification)
+      allow update: if isAuthenticated() && request.auth.uid == sellerId &&
+                       !request.resource.data.verified;
+
+      // Admin can create seller records (on verification approval)
+      allow create: if isAdmin();
+
+      // Admin can update seller records (including verification)
+      allow update: if isAdmin();
+    }
+
+    // ============================================
+    // PRODUCTS COLLECTION - MARKETPLACE
+    // ============================================
+    
+    match /products/{productId} {
+      // Anyone can read active published products
+      allow read: if true;
+      
+      // Only verified sellers can create products with active status
+      allow create: if isAuthenticated() && 
+                       isVerifiedSeller(request.auth.uid) &&
+                       request.resource.data.sellerId == request.auth.uid &&
+                       request.resource.data.status == 'active';
+      
+      // Only seller or admin can update their products
+      allow update: if isAuthenticated() && 
+                       (request.auth.uid == resource.data.sellerId || isAdmin());
+      
+      // Only seller or admin can delete
+      allow delete: if isAuthenticated() && 
+                       (request.auth.uid == resource.data.sellerId || isAdmin());
+    }
+
+    // Chat/Messages
+    match /chats/{chatId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /messages/{messageId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Direct messages
+    match /directMessages/{conversationId} {
+      allow read, write: if isAuthenticated() && 
+        (request.auth.uid == resource.data.userId1 || request.auth.uid == resource.data.userId2);
+      
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // ============================================
+    // SHOPPING CARTS
+    // ============================================
+    // Carts are now stored as fields in user documents
+    // No separate rules needed - covered by user document rules
+
+    // Quizzes
+    match /quizzes/{quizId} {
+      allow read: if true;
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    // User Study Stats
+    match /userStudyStats/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update, delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User Study Stats per user (alternative structure)
+    match /users/{userId}/stats/{statId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow create, update, delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ============================================
+    // USER QUIZ RESULTS (SUBCOLLECTION)
+    // ============================================
+    match /users/{userId}/quizResults/{resultId} {
+      // Users can read their own quiz results
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Users can create their own quiz results
+      allow create: if isAuthenticated() && request.auth.uid == userId && 
+                       request.resource.data.userId == userId;
+      
+      // Users can update their own quiz results
+      allow update: if isAuthenticated() && request.auth.uid == userId &&
+                       resource.data.userId == userId;
+      
+      // Users can delete their own quiz results
+      allow delete: if isAuthenticated() && request.auth.uid == userId &&
+                       resource.data.userId == userId;
+      
+      // Admin can read/delete any quiz results
+      allow read, delete: if isAdmin();
+    }
+
+    // Study Timetable per user (AI-generated plans)
+    match /users/{userId}/studyTimetable/{docId} {
+      // Users can read their own timetable, admins can read all
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+
+      // Users can create/update/delete their own timetable document
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Academic help conversations
+    match /academicHelp/{conversationId} {
+      allow read, write: if isAuthenticated() && isUser(resource.data.userId);
+      allow create: if isAuthenticated();
+    }
+
+    // Tutors
+    match /tutors/{tutorId} {
+      allow read: if true;
+      allow create, update, delete: if isAuthenticated() && (isUser(tutorId) || isAdmin());
+    }
+
+    // Groups
+    match /groups/{groupId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.createdBy || isAdmin());
+      
+      match /messages/{messageId} {
+        allow read: if true;
+        allow create, update, delete: if isAuthenticated() && (request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members || isAdmin());
+      }
+    }
+
+    // Notifications
+    match /notifications/{userId} {
+      allow read, write: if isUser(userId);
+      
+      match /{notificationId}/document {
+        allow read, write: if isUser(userId);
+      }
+    }
+
+    // Admin collection
+    match /admin/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Analytics
+    match /analytics/{document=**} {
+      allow read: if isAdmin();
+      allow write: if isAuthenticated();
+    }
+
+    // Allow all collections for authenticated users
+    // This is more permissive but can be restricted based on your needs
+    match /{document=**} {
+      allow read, write: if isAuthenticated() || request.path.split('/')[4] in [
+        'users', 'products', 'tutors', 'groups', 'orders'
+      ];
+    }
+
+    // ============================================
+    // STUDY MATERIALS COLLECTION
+    // ============================================
+    match /studyMaterials/{docId} {
+      // Anyone can read published study materials
+      allow read: if isAuthenticated();
+      
+      // Only verified sellers can create materials
+      allow create: if isAuthenticated() && 
+                       isVerifiedSeller(request.auth.uid) &&
+                       request.resource.data.uploadedBy == request.auth.uid;
+      
+      // Only material owner can update
+      allow update: if isAuthenticated() && 
+                       resource.data.uploadedBy == request.auth.uid;
+      
+      // Only material owner can delete
+      allow delete: if isAuthenticated() && 
+                       resource.data.uploadedBy == request.auth.uid;
+    }
+
+    // ============================================
+    // QUIZ SESSIONS COLLECTION
+    // ============================================
+    match /quizSessions/{sessionId} {
+      allow read: if isAuthenticated() && 
+                     (isUserOwner(resource.data.userId) || isAdmin());
+      
+      allow create: if isAuthenticated() && 
+                       request.resource.data.userId == request.auth.uid;
+      
+      allow update: if isAuthenticated() && 
+                       resource.data.userId == request.auth.uid &&
+                       (resource.data.status == 'active' || resource.data.status == 'submitted');
+      
+      allow delete: if isAuthenticated() && 
+                       (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // ============================================
+    // USER STUDY STATS COLLECTION
+    // ============================================
+    match /userStudyStats/{uid} {
+      allow read: if isAuthenticated() && 
+                     (isUserOwner(uid) || isAdmin());
+      
+      allow write: if isAuthenticated() && isUserOwner(uid);
+      allow create: if isAuthenticated() && isUserOwner(uid);
+    }
+
+
+
+    // ============================================
+    // ORDERS COLLECTION
+    // ============================================
+    
+    match /orders/{orderId} {
+      // Buyer and seller can read their own orders
+      allow read: if isAuthenticated() && 
+                     (isUserOwner(resource.data.buyerId) || 
+                      isUserOwner(resource.data.sellerId) ||
+                      isAdmin());
+      
+      // Only buyer can create order
+      allow create: if isAuthenticated() && 
+                       request.resource.data.buyerId == request.auth.uid;
+      
+      // Both buyer and seller can update their orders
+      allow update: if isAuthenticated() && 
+                       (isUserOwner(resource.data.buyerId) || 
+                        isUserOwner(resource.data.sellerId));
+      
+      // Only buyer and seller can delete
+      allow delete: if isAuthenticated() && 
+                       (isUserOwner(resource.data.buyerId) || 
+                        isUserOwner(resource.data.sellerId) ||
+                        isAdmin());
+    }
+
+    // ============================================
+    // SELLER ORDERS
+    // ============================================
+    match /sellers/{sellerId}/orders/{orderId} {
+      allow read: if isAuthenticated() && 
+                     (isUserOwner(sellerId) || isAdmin());
+      
+      allow write: if isAuthenticated() && isUserOwner(sellerId);
+    }
+
+    // ============================================
+    // CARTS COLLECTION (DEPRECATED)
+    // ============================================
+    // Carts are now stored as fields in user documents:
+    // - marketplaceCart: items from seller marketplace
+    // - studyResourcesCart: items from study materials
+    
+    match /carts/{userId} {
+      allow read: if isAuthenticated() && isUserOwner(userId);
+      allow write: if isAuthenticated() && isUserOwner(userId);
+      allow create: if isAuthenticated() && isUserOwner(userId);
+    }
+
+    // ============================================
+    // ID CARD VERIFICATION SYSTEM
+    // ============================================
+    
+    match /users/{userId}/idCardSubmissions/{submissionId} {
+      // Users can read their own submissions
+      allow read: if request.auth.uid == userId;
+      
+      // Users can create submissions for themselves
+      allow create: if request.auth.uid == userId && 
+                       request.resource.data.userId == userId &&
+                       request.resource.data.imageUrl != null;
+      
+      // Users can update their own pending submissions
+      allow update: if request.auth.uid == userId && 
+                       resource.data.userId == userId;
+      
+      // Admins can read all and update status
+      allow read: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ============================================
+    // USER STATUS & ONLINE TRACKING
+    // ============================================
+    
+    match /userStatus/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if request.auth.uid == userId;
+    }
+
+    // ============================================
+    // VOICE CALLS
+    // ============================================
+    
+    match /voiceCalls/{callId} {
+      allow create: if request.auth.uid != null && 
+                       request.auth.uid == request.resource.data.callerId;
+      allow read, update: if request.auth.uid != null;
+      allow delete: if request.auth.uid != null;
+    }
+
+    match /incomingCalls/{callId} {
+      allow create: if request.auth.uid != null;
+      allow read, update, delete: if request.auth.uid != null;
+    }
+
+    // ============================================
+    // COURSE HIERARCHY SYSTEM
+    // ============================================
+    
+    match /courseAdministrators/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /levelCourseReps/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /levelGroupReps/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+      allow delete: if isAdmin() || request.auth.uid == resource.data.userId;
+    }
+
+    match /courseGroups/{groupId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin() || 
+                      isAdminOfGroup(groupId) ||
+                      (request.auth.uid == resource.data.createdBy);
+      allow delete: if isAdmin() || 
+                      isAdminOfGroup(groupId) ||
+                      (request.auth.uid == resource.data.createdBy);
+
+      match /notifications/{notificationId} {
+        allow read: if true;
+        allow write: if isAdmin() || isAdminOfGroup(groupId);
+      }
+    }
+
+    match /groupTimetables/{classId} {
+      allow read: if true;
+      allow create, update: if isAdmin() || isMemberOfGroupByClassId(classId);
+      allow delete: if isAdmin() || isAdminOfGroupByClassId(classId);
+    }
+
+    match /groupTimetableMetadata/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /groupChats/{groupId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /groupChats/{groupId}/messages/{messageId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && 
+                      request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isMessageOwner() || isAdmin();
+    }
+
+    match /groupChatMetadata/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /courseNotifications/{document=**} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /groupNotificationMetadata/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /courseAnnouncements/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // MESSAGING SYSTEM
+    // ============================================
+    
+    match /userConversations/{userId}/conversations/{conversationId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /chats/{conversationId}/messages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    // ============================================
+    // NEWS & CAROUSEL
+    // ============================================
+    
+    match /news/{newsId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /carousel_images/{imageId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // MARKETPLACE REQUESTS
+    // ============================================
+    
+    match /marketplaceRequests/{requestId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // ============================================
+    // THREADS SOCIAL FEED
+    // ============================================
+    match /threads_posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       hasThreadsProfileReady() &&
+                       request.resource.data.authorId == request.auth.uid;
+
+      // Author/admin can fully edit; other users can only update counters.
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.authorId ||
+        isAdmin() ||
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'likeCount', 'dislikeCount', 'viewCount', 'replyCount', 'updatedAt', 'updatedAtMs'
+        ])
+      );
+
+      allow delete: if isAuthenticated() &&
+                       (request.auth.uid == resource.data.authorId || isAdmin());
+
+      match /replies/{replyId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() &&
+                         hasThreadsProfileReady() &&
+                         request.resource.data.userId == request.auth.uid &&
+                         request.resource.data.text is string &&
+                         request.resource.data.text.size() > 0 &&
+                         request.resource.data.depth is int &&
+                         request.resource.data.depth >= 1 &&
+                         request.resource.data.depth <= 5 &&
+                         (
+                           !('parentReplyId' in request.resource.data) ||
+                           request.resource.data.parentReplyId == null ||
+                           (
+                             request.resource.data.parentReplyId is string &&
+                             exists(/databases/$(database)/documents/threads_posts/$(postId)/replies/$(request.resource.data.parentReplyId)) &&
+                             get(/databases/$(database)/documents/threads_posts/$(postId)/replies/$(request.resource.data.parentReplyId)).data.depth is int &&
+                             get(/databases/$(database)/documents/threads_posts/$(postId)/replies/$(request.resource.data.parentReplyId)).data.depth < 5 &&
+                             request.resource.data.depth == get(/databases/$(database)/documents/threads_posts/$(postId)/replies/$(request.resource.data.parentReplyId)).data.depth + 1
+                           )
+                         );
+        allow update: if isAuthenticated() && request.auth.uid == resource.data.userId;
+        allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      }
+
+      match /reactions/{userId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isAuthenticated() && request.auth.uid == userId;
+      }
+
+      match /views/{userId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isAuthenticated() && request.auth.uid == userId;
+      }
+    }
+
+    match /threads_usernames/{username} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /users/{userId}/threadFollowers/{followerId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                      request.auth.uid == followerId &&
+                      request.resource.data.userId == request.auth.uid &&
+                      request.resource.data.targetUserId == userId;
+      allow delete: if isAuthenticated() && request.auth.uid == followerId;
+      allow update: if false;
+    }
+
+    match /users/{userId}/threadFollowing/{targetUserId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                      request.auth.uid == userId &&
+                      request.resource.data.userId == request.auth.uid &&
+                      request.resource.data.targetUserId == targetUserId;
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if false;
+    }
+
+    match /users/{userId}/marketplaceStats/{statId} {
+      allow read: if isAuthenticated();
+      allow write: if request.auth.uid == userId || isAdmin();
+    }
+
+    // ============================================
+    // NOTIFICATIONS
+    // ============================================
+    
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    match /systemNotifications/{notificationId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // USER LOCATIONS
+    // ============================================
+    
+   // match /userLocations/{userId} {
+   //   allow read: if isAuthenticated();
+   //   allow write: if request.auth.uid == userId;
+   // }
+
+   // match /user_locations/{userId} {
+    //  allow read: if isAuthenticated();
+    //  allow write: if request.auth.uid == userId;
+    //}
+//
+   // match /location_history/{historyId} {
+   //   allow read: if isAuthenticated();
+   //   allow write: if isAuthenticated();
+   // }
+
+    // ============================================
+    // DEVICE MANAGEMENT
+    // ============================================
+    
+    match /users/{userId}/devices/{deviceId} {
+      allow read, write: if request.auth.uid == userId || isAdmin();
+    }
+
+    // ============================================
+    // POINTS & REWARDS (GLOBAL)
+    // ============================================
+    
+    match /points_ledger/{ledgerId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /user_points/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || request.auth.uid == userId;
+    }
+
+    // ============================================
+    // BADGES
+    // ============================================
+    
+    match /badges/{badgeId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // CALENDAR EVENTS
+    // ============================================
+    
+    match /events/{eventId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // ============================================
+    // TUTORS
+    // ============================================
+    
+    match /tutors/{tutorId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // ADS
+    // ============================================
+    
+    match /ads/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // APP CONFIG & SYSTEM
+    // ============================================
+    
+    match /config/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /system/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /scheduledDisables/{scheduleId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // ACADEMIC SESSIONS
+    // ============================================
+    
+    match /academicSessions/{sessionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /sessionActions/{actionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // SELLER VERIFICATION REQUESTS
+    // ============================================
+    
+    match /sellerVerificationRequests/{requestId} {
+      // Users can create their own verification requests
+      allow create: if isAuthenticated() && 
+                       request.resource.data.userId == request.auth.uid;
+      
+      // Users can read their own requests (including querying via collection)
+      allow read: if isAuthenticated() && 
+                     resource.data.userId == request.auth.uid;
+      
+      // Only admins can read all requests and update/delete
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ============================================
+    // DEFAULT DENY ALL
+    // ============================================
+    
+    // Allow anyone (even unauthenticated) to read the appSettings/emailSuffixes document
+    match /appSettings/emailSuffixes {
+      allow get: if true;
+      allow list: if true;
+      // Writes remain restricted to admins
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

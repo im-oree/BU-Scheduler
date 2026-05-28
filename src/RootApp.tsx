@@ -72,7 +72,9 @@ function AuthRouteGate() {
     return <LoadingScreen />;
   }
 
-  if (status !== 'authenticated') {
+  // Allow anonymous users to access the app as guests; protected actions
+  // will prompt for sign-in via UI modals. Only block while loading.
+  if (status !== 'authenticated' && status !== 'anonymous') {
     return <Navigate to={`/login?returnTo=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />;
   }
 
@@ -92,7 +94,9 @@ function PublicLandingRedirect() {
     return <LoadingScreen />;
   }
 
-  if (status === 'authenticated') {
+  // If authenticated or anonymous, send to the app home. Otherwise, go
+  // to login (rare edge case).
+  if (status === 'authenticated' || status === 'anonymous') {
     return <Navigate to={normalizeReturnTo(session?.returnTo ?? '/home')} replace />;
   }
 

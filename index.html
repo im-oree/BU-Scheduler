@@ -4,7 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="BU Scheduler - timetable, reminders, groups, and StudentHub SSO." />
-  <script>navigator.serviceWorker.register("pwabuilder-adv-sw.js")</script> 
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('pwabuilder-adv-sw.js', { type: 'module' }).catch(() => {});
+    }
+  </script>
   <link rel="manifest" href="manifest.json" />  <title>BU Scheduler</title>
   </head>
   <body>

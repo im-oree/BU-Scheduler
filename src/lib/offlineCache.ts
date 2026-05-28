@@ -98,6 +98,35 @@ export async function clearCachedValue(key: string): Promise<void> {
   }
 }
 
+export async function clearCachedValuesByPrefix(prefix: string): Promise<void> {
+  try {
+    const db = await openDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.openCursor();
+
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+
+        const key = String(cursor.key);
+        if (key.startsWith(prefix)) {
+          cursor.delete();
+        }
+        cursor.continue();
+      };
+
+      request.onerror = () => reject(request.error ?? new Error('Failed to clear offline cache.'));
+    });
+  } catch {
+    // Ignore prefix clear failures as this is only a best-effort cache.
+  }
+}
+
 export async function withCachedValue<T>(params: {
   key: string;
   loader: () => Promise<T>;

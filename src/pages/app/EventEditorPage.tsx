@@ -11,6 +11,7 @@ import {
 import { PageFrame } from '../../components/shared';
 import { fetchGroupById, fetchGroupMembers, fetchCurrentUserProfile } from '../../lib/studenthubData';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useAppStore } from '../../store/useAppStore';
 
 export function EventEditorPage() {
   const { groupId, eventId } = useParams();
@@ -50,7 +51,18 @@ export function EventEditorPage() {
       description="Use validated fields for start and end time, recurrence, visibility, and attachments."
       action={
         canManage ? (
-          <Button variant="primary" leadingIcon={<Plus size={18} />}>
+          <Button
+            variant="primary"
+            leadingIcon={<Plus size={18} />}
+            onClick={() => {
+              const status = useAuthStore.getState().status;
+              if (status === 'authenticated') {
+                // actual save handler lives elsewhere — placeholder
+                return;
+              }
+              useAppStore.getState().openAuthModal('create event');
+            }}
+          >
             Save
           </Button>
         ) : null
@@ -91,7 +103,23 @@ export function EventEditorPage() {
           {canManage ? <Button variant="danger">Delete</Button> : null}
           <div className="form-actions__right">
             <Button variant="ghost">Cancel</Button>
-            {canManage ? <Button variant="primary">Save event</Button> : <span className="muted">You do not have permission to add or edit events for this group.</span>}
+            {canManage ? (
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const status = useAuthStore.getState().status;
+                  if (status === 'authenticated') {
+                    // placeholder: submit
+                    return;
+                  }
+                  useAppStore.getState().openAuthModal('create event');
+                }}
+              >
+                Save event
+              </Button>
+            ) : (
+              <span className="muted">You do not have permission to add or edit events for this group.</span>
+            )}
           </div>
         </div>
       </Card>

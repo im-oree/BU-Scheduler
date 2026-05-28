@@ -38,6 +38,7 @@ import {
 import { fetchUserGroups } from '../lib/studenthubData';
 import { BottomNav } from './BottomNav';
 import { Onboarding } from './Onboarding';
+import { AuthRequiredModal } from './AuthRequiredModal';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -973,15 +974,22 @@ export function AppShell() {
             {/* Right actions */}
             <div className="topbar__meta">
               {/* Quick add button */}
-              <Link
-                to={newEventLink}
+              <button
                 className="button button--primary button--sm topbar__action"
                 style={{ gap: 8 }}
                 aria-label="Add new class"
+                onClick={() => {
+                  const status = useAuthStore.getState().status;
+                  if (status === 'authenticated') {
+                    navigate(newEventLink);
+                    return;
+                  }
+                  useAppStore.getState().openAuthModal('add a class');
+                }}
               >
                 <PlusCircle size={16} aria-hidden="true" />
                 <span>Add class</span>
-              </Link>
+              </button>
 
               {/* Notifications */}
               <NotificationBell count={notificationCount} />
@@ -1008,6 +1016,7 @@ export function AppShell() {
           ═══════════════════════════════════════════════════════ */}
       <BottomNav />
       <Onboarding />
+      <AuthRequiredModal />
     </div>
   );
 }

@@ -27,6 +27,7 @@ import {
 import { Badge, Button, Card } from '../../components/ui';
 import { PageFrame, StatGrid } from '../../components/shared';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useAppStore } from '../../store/useAppStore';
 import {
   fetchUserGroups,
   fetchUserTimetableEntries,
@@ -1066,6 +1067,7 @@ function GroupCard({
 /* ── Empty Groups ──────────────────────────────────────────── */
 
 function EmptyGroups({ isAdmin }: { isAdmin: boolean }) {
+  const isAuthenticated = useAuthStore((s) => s.status === 'authenticated');
   return (
     <div style={S.empty} role="status">
       <div style={S.emptyIcon('var(--secondary-soft)', 'var(--secondary)')}>
@@ -1074,15 +1076,29 @@ function EmptyGroups({ isAdmin }: { isAdmin: boolean }) {
       <div>
         <h3 style={{ fontSize: '1rem', marginBottom: 6 }}>No groups yet</h3>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', maxWidth: '36ch', lineHeight: 1.6 }}>
-          Join a group to see your schedule, classmates, and shared resources.
+          {isAuthenticated
+            ? 'Join a group to see your schedule, classmates, and shared resources.'
+            : 'Sign in to browse groups and view your schedule.'}
         </p>
       </div>
-      {isAdmin && (
+      {isAuthenticated && isAdmin && (
         <Link to="/groups" style={{ marginTop: 4 }}>
           <Button variant="primary" size="sm" leadingIcon={<Sparkles size={16} />}>
             Browse groups
           </Button>
         </Link>
+      )}
+      {!isAuthenticated && (
+        <div style={{ marginTop: 8 }}>
+          <Button
+            variant="primary"
+            size="sm"
+            leadingIcon={<User size={14} />}
+            onClick={() => useAppStore.getState().openAuthModal('browse groups')}
+          >
+            Sign in
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -1414,6 +1430,7 @@ const CSS = `
 
 export function HomePage() {
   const userId = useAuthStore((s) => s.session?.user.uid);
+  const isAuthenticated = useAuthStore((s) => s.status === 'authenticated');
 
   // Re-render every 30s for live progress updates
   useCurrentTime(30_000);

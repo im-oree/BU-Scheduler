@@ -416,6 +416,8 @@ type InputProps = InputHTMLAttributes<HTMLInputElement> & {
   leadingIcon?: ReactNode;
   trailingIcon?: ReactNode;
   hideLabel?: boolean;
+  /** Called whenever the user toggles password visibility (only relevant when type="password") */
+  onShowPasswordChange?: (visible: boolean) => void;
 };
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
@@ -431,6 +433,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       hideLabel = false,
       className = '',
       type = 'text',
+      onShowPasswordChange,
       ...props
     },
     ref
@@ -512,7 +515,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               {isPassword ? (
                 <button
                   type="button"
-                  onClick={() => setShowPassword((v) => !v)}
+                  onMouseDown={(e) => e.preventDefault()} // keep input focused
+                  onClick={() =>
+                    setShowPassword((v) => {
+                      const next = !v;
+                      onShowPasswordChange?.(next);
+                      return next;
+                    })
+                  }
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   style={{
                     background: 'none',

@@ -12,6 +12,7 @@ import {
   Textarea,
 } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
+import { useAppStore } from '../../store/useAppStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import {
   fetchSchedulerUserProfile,
@@ -297,6 +298,7 @@ function RolesSection({ profile }: { profile: SchedulerUserProfile }) {
 export function ProfilePage() {
   // ── Auth (BU Scheduler pattern) ───────────────────────────
   const userId = useAuthStore((s) => s.session?.user.uid);
+  const isAuthenticated = useAuthStore((s) => s.status === 'authenticated');
   const navigate = useNavigate();
 
   // ── Tab state (StudentHub pattern) ────────────────────────
@@ -354,7 +356,13 @@ export function ProfilePage() {
           {/* Edit button in the header action slot */}
           <Button
             variant="secondary"
-            onClick={() => setShowEditModal(true)}
+            onClick={() => {
+              if (!userId) {
+                useAppStore.getState().openAuthModal('edit profile');
+                return;
+              }
+              setShowEditModal(true);
+            }}
           >
             Edit Profile
           </Button>
@@ -382,6 +390,20 @@ export function ProfilePage() {
             ════════════════════════════════════════════════ */}
         {tab === 'profile' && (
           <>
+            {!isAuthenticated && !profileQuery.isLoading && (
+              <div className="flex flex-col items-center gap-3 py-12 text-center">
+                <span className="muted">
+                  Sign in to view and edit your profile.
+                </span>
+                <Button
+                  variant="primary"
+                  onClick={() => useAppStore.getState().openAuthModal('view your profile')}
+                >
+                  Sign in
+                </Button>
+              </div>
+            )}
+
             {/* Loading skeleton — matches StudentHub loading state */}
             {profileQuery.isLoading && (
               <div className="flex items-center justify-center py-12">

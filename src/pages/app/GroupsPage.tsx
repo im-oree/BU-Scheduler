@@ -34,6 +34,7 @@ import {
   Tabs,
 } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
+import { useAppStore } from '../../store/useAppStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import {
   fetchAllGroups,
@@ -473,7 +474,10 @@ export function GroupsPage() {
       setJoinError('Please enter a valid group ID or invite link.');
       return;
     }
-    if (!userId || !profileQuery.data) return;
+    if (!userId || !profileQuery.data) {
+      useAppStore.getState().openAuthModal('join group by ID');
+      return;
+    }
 
     setJoinBusy(true);
     setJoinError(null);
@@ -495,7 +499,10 @@ export function GroupsPage() {
   }
 
   async function handleJoinCard(groupId: string) {
-    if (!userId || !profileQuery.data) return;
+    if (!userId || !profileQuery.data) {
+      useAppStore.getState().openAuthModal('join group');
+      return;
+    }
     try {
       await joinGroup(groupId, profileQuery.data, userId);
       await Promise.all([

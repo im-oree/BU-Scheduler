@@ -3,6 +3,7 @@
 // React Query (stable) + onSnapshot (real-time) + studenthubData functions
 
 import { useEffect, useRef, useState } from 'react';
+import { useAppStore } from '../../store/useAppStore';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -343,13 +344,11 @@ export function GroupDetailPage() {
   // ─── Actions ──────────────────────────────────────────────────────────────
 
   async function handleSendMessage() {
-    if (
-      !groupId ||
-      !userId ||
-      !chatText.trim() ||
-      !profileQuery.data
-    )
+    if (!groupId || !chatText.trim()) return;
+    if (!userId || !profileQuery.data) {
+      useAppStore.getState().openAuthModal('send a message');
       return;
+    }
     setSendingChat(true);
     try {
       // Uses studenthubData.sendGroupChatMessage — same as Student Hub
@@ -369,7 +368,11 @@ export function GroupDetailPage() {
   }
 
   async function handleJoinGroup() {
-    if (!groupId || !userId || !profileQuery.data) return;
+    if (!groupId) return;
+    if (!userId || !profileQuery.data) {
+      useAppStore.getState().openAuthModal('join group');
+      return;
+    }
     try {
       const { joinGroup } = await import('../../lib/studenthubData');
       await joinGroup(groupId, profileQuery.data, userId);

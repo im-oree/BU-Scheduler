@@ -6,6 +6,8 @@ import { Button, Card, Input } from '../../components/ui';
 import { normalizeReturnTo } from '../../lib/auth';
 import { initFirebase, signInWithEmail } from '../../lib/firebase';
 import { useAuthStore } from '../../store/useAuthStore';
+import { BearMascot, type BearMood } from '../../components/BearMascot';
+import { bearSounds } from '../../lib/bearSounds';
 
 const STUDENTHUB_SIGNUP_URL = 'https://studenthub-app.vercel.app/signup';
 
@@ -23,6 +25,14 @@ export function LoginPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [showSignupBanner, setShowSignupBanner] = useState(false);
 
+  // 🐻 Bear mascot state
+  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(
+    null,
+  );
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [loginSuccess, setLoginSuccess] = useState(false);
+  const [soundsMuted, setSoundsMuted] = useState(bearSounds.isMuted());
+
   const popupRef = useRef<Window | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -33,21 +43,49 @@ export function LoginPage() {
   const isBusy = loadingSignIn;
   const displayedError = formError ?? authError ?? null;
 
-  // Redirect if already authenticated
+  // ── Derive bear mood ──
+  const bearMood: BearMood = (() => {
+    if (loginSuccess || authStatus === 'authenticated') return 'happy';
+    if (displayedError) return 'sad';
+    if (focusedField === 'password') {
+      return passwordVisible ? 'peeking' : 'hiding';
+    }
+    if (focusedField === 'email') return 'tracking';
+    return 'idle';
+  })();
+
+  // Play sounds on mood changes
+  const prevMoodRef = useRef<BearMood>('idle');
+  useEffect(() => {
+    const prev = prevMoodRef.current;
+    if (prev === bearMood) return;
+
+    if (bearMood === 'hiding') bearSounds.hide();
+    else if (bearMood === 'peeking') bearSounds.peek();
+    else if (bearMood === 'sad') bearSounds.sad();
+    else if (bearMood === 'happy') bearSounds.happy();
+
+    prevMoodRef.current = bearMood;
+  }, [bearMood]);
+
+  // Redirect on success
   useEffect(() => {
     if (authStatus === 'authenticated') {
-      navigate(returnTo, { replace: true });
+      setLoginSuccess(true);
+      const t = setTimeout(() => {
+        navigate(returnTo, { replace: true });
+      }, 900);
+      return () => clearTimeout(t);
     }
   }, [authStatus, navigate, returnTo]);
 
-  // Cleanup popup poll on unmount
+  // Cleanup popup poll
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
 
-  // Open StudentHub signup in a popup
   function openSignupPopup() {
     const w = 480;
     const h = 700;
@@ -61,7 +99,6 @@ export function LoginPage() {
     );
 
     if (!popup) {
-      // Popup blocked — open in new tab instead
       window.open(STUDENTHUB_SIGNUP_URL, '_blank');
       setShowSignupBanner(true);
       return;
@@ -69,7 +106,6 @@ export function LoginPage() {
 
     popupRef.current = popup;
 
-    // Poll to detect when popup closes
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => {
       if (!popupRef.current || popupRef.current.closed) {
@@ -81,7 +117,6 @@ export function LoginPage() {
     }, 500);
   }
 
-  // Handle sign in
   async function handleEmailSignIn(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError(null);
@@ -107,7 +142,11 @@ export function LoginPage() {
     }
   }
 
-  // Loading state
+  function toggleMute() {
+    const muted = bearSounds.toggleMute();
+    setSoundsMuted(muted);
+  }
+
   if (authStatus === 'loading') {
     return <LoadingScreen message="Checking your session…" />;
   }
@@ -115,19 +154,48 @@ export function LoginPage() {
   return (
     <div className="auth-layout auth-layout--centered auth-layout--login">
       <Card className="auth-card auth-card--login auth-card--elevated">
+        {/* ── 🐻 Bear mascot ────────────────────────── */}
+        <div style={{ position: 'relative' }}>
+          <BearMascot
+            mood={bearMood}
+            emailProgress={Math.min(email.length / 20, 1)}
+          />
+
+          {/* Mute toggle */}
+          <button
+            type="button"
+            onClick={toggleMute}
+            aria-label={soundsMuted ? 'Unmute bear' : 'Mute bear'}
+            title={soundsMuted ? 'Unmute bear' : 'Mute bear'}
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: '#6B7280',
+              fontSize: 14,
+              padding: 6,
+              opacity: 0.6,
+              transition: 'opacity 0.15s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.6')}
+          >
+            {soundsMuted ? '🔇' : '🔊'}
+          </button>
+        </div>
 
         {/* ── Brand header ──────────────────────────── */}
         <div className="auth-card__brand">
-          <div className="brand-link__mark brand-link__mark--small">B</div>
           <div>
-            <p className="eyebrow eyebrow--subtle">BU Scheduler</p>
-            <h1>Welcome back</h1>
+            <h1>Hello There!</h1>
           </div>
         </div>
 
         <p className="muted auth-card__intro">
-          Sign in with your StudentHub account to access your schedules and
-          groups.
+          Sign in with your StudentHub account.
         </p>
 
         {/* ── Signup complete banner ────────────────── */}
@@ -218,7 +286,7 @@ export function LoginPage() {
         {/* ── Sign in form ──────────────────────────── */}
         <form onSubmit={handleEmailSignIn} className="auth-form">
           <label className="auth-field">
-            <span className="auth-field__label">Email</span>
+            <span className="auth-field__label"></span>
             <Input
               label="Email"
               id="email"
@@ -229,13 +297,15 @@ export function LoginPage() {
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onFocus={() => setFocusedField('email')}
+              onBlur={() => setFocusedField(null)}
               disabled={isBusy}
               required
             />
           </label>
 
           <label className="auth-field">
-            <span className="auth-field__label">Password</span>
+            <span className="auth-field__label"></span>
             <Input
               label="Password"
               id="password"
@@ -245,6 +315,9 @@ export function LoginPage() {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onFocus={() => setFocusedField('password')}
+              onBlur={() => setFocusedField(null)}
+              onShowPasswordChange={setPasswordVisible}
               disabled={isBusy}
               required
             />
@@ -284,13 +357,7 @@ export function LoginPage() {
             margin: '24px 0',
           }}
         >
-          <div
-            style={{
-              flex: 1,
-              height: 1,
-              backgroundColor: '#23263D',
-            }}
-          />
+          <div style={{ flex: 1, height: 1, backgroundColor: '#23263D' }} />
           <span
             style={{
               fontSize: 11,
@@ -302,13 +369,7 @@ export function LoginPage() {
           >
             No account?
           </span>
-          <div
-            style={{
-              flex: 1,
-              height: 1,
-              backgroundColor: '#23263D',
-            }}
-          />
+          <div style={{ flex: 1, height: 1, backgroundColor: '#23263D' }} />
         </div>
 
         {/* ── Create account button ─────────────────── */}
@@ -342,7 +403,6 @@ export function LoginPage() {
             e.currentTarget.style.color = '#B3B6C6';
           }}
         >
-          {/* User plus icon */}
           <svg
             width="16"
             height="16"
@@ -361,7 +421,6 @@ export function LoginPage() {
 
           <span>Create a StudentHub Account</span>
 
-          {/* External link icon */}
           <svg
             width="13"
             height="13"
