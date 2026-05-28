@@ -23,9 +23,12 @@ const AuthCallbackPage = lazyNamedPage('AuthCallbackPage');
 const StudentHubAuthPage = lazyNamedPage('StudentHubAuthPage');
 const HomePage = lazyNamedPage('HomePage');
 const GroupsPage = lazyNamedPage('GroupsPage');
+const GroupCreatePage = lazyNamedPage('GroupCreatePage');
 const GroupDetailPage = lazyNamedPage('GroupDetailPage');
+const GroupManagementPage = lazyNamedPage('GroupManagementPage');
 const TimetablePage = lazyNamedPage('TimetablePage');
 const EventEditorPage = lazyNamedPage('EventEditorPage');
+const AnnouncementEditorPage = lazyNamedPage('AnnouncementEditorPage');
 const BulkImportPage = lazyNamedPage('BulkImportPage');
 const MembersPage = lazyNamedPage('MembersPage');
 const InvitePage = lazyNamedPage('InvitePage');
@@ -138,10 +141,13 @@ export default function RootApp() {
                 <Route path="/app" element={<Navigate to="/home" replace />} />
                 <Route path="/home" element={<HomePage />} />
                 <Route path="/groups" element={<GroupsPage />} />
+                <Route path="/groups/new" element={<GroupCreatePage />} />
                 <Route path="/groups/:groupId" element={<GroupDetailPage />} />
+                <Route path="/groups/:groupId/manage" element={<GroupManagementPage />} />
                 <Route path="/groups/:groupId/members" element={<MembersPage />} />
                 <Route path="/groups/:groupId/chat" element={<ChatPage />} />
                 <Route path="/groups/:groupId/events/new" element={<EventEditorPage />} />
+                <Route path="/groups/:groupId/announcements/new" element={<AnnouncementEditorPage />} />
                 <Route path="/groups/:groupId/import" element={<BulkImportPage />} />
                 <Route path="/events/:eventId/edit" element={<EventEditorPage />} />
                 <Route path="/timetable" element={<TimetablePage />} />

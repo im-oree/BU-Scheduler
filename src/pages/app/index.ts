@@ -1,9 +1,12 @@
 export { HomePage } from './HomePage';
 export { GroupsPage } from './GroupsPage';
 export { GroupDetailPage } from './GroupDetailPage';
+export { GroupManagementPage } from './GroupManagementPage';
 export { TimetablePage } from './TimetablePage';
 export { EventEditorPage } from './EventEditorPage';
+export { AnnouncementEditorPage } from './AnnouncementEditorPage';
 export { BulkImportPage } from './BulkImportPage';
+export { GroupCreatePage } from './GroupCreatePage';
 export { MembersPage } from './MembersPage';
 export { ChatPage } from './ChatPage';
 export { ProfilePage } from './ProfilePage';

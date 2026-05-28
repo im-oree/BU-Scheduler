@@ -3,6 +3,7 @@ import {
   Bell,
   CalendarDays,
   ChevronDown,
+  ChevronRight,
   Grid2x2,
   Home,
   LogOut,
@@ -13,77 +14,154 @@ import {
   Settings2,
   X,
   Users,
-  Clock,
   Sparkles,
-  UserCircle
+  UserCircle,
+  BookOpen,
+  Clock,
+  ArrowUpRight,
+  Moon,
+  Sun,
+  HelpCircle,
+  Shield,
+  Keyboard,
 } from 'lucide-react';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import {
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { useEffect, useRef, useCallback } from 'react';
+import {
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  useState,
+  type ReactNode,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { fetchUserGroups } from '../lib/studenthubData';
+import { BottomNav } from './BottomNav';
 
-/* ═══════════════════════════════════════════════════════════════
-   NAV CONFIG
-   ═══════════════════════════════════════════════════════════════ */
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-const navItems: { to: string; label: string; icon: LucideIcon }[] = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  badge?: number;
+}
+
+interface MobileTabItem extends NavItem {
+  isAction?: boolean;
+}
+
+interface GroupData {
+  id: string;
+  title: string;
+  courseCode: string;
+  memberCount: number;
+  nextClass?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Nav Configuration
+// ---------------------------------------------------------------------------
+
+const primaryNavItems: NavItem[] = [
   { to: '/home', label: 'Home', icon: Home },
   { to: '/timetable', label: 'Timetable', icon: CalendarDays },
   { to: '/groups', label: 'Groups', icon: Grid2x2 },
   { to: '/chat', label: 'Messages', icon: MessageCircle },
+];
+
+const secondaryNavItems: NavItem[] = [
   { to: '/notifications', label: 'Notifications', icon: Bell },
   { to: '/settings', label: 'Settings', icon: Settings2 },
 ];
 
-const mobileTabs: { to: string; label: string; icon: LucideIcon; isAction?: boolean }[] = [
+const mobileTabs: MobileTabItem[] = [
   { to: '/home', label: 'Home', icon: Home },
   { to: '/timetable', label: 'Schedule', icon: CalendarDays },
-  { to: '/groups/grp_100/events/new', label: 'New', icon: PlusCircle, isAction: true },
+  { to: '/groups/new-event', label: 'New', icon: PlusCircle, isAction: true },
   { to: '/groups', label: 'Groups', icon: Grid2x2 },
   { to: '/settings', label: 'More', icon: Settings2 },
 ];
 
-/* ═══════════════════════════════════════════════════════════════
-   HELPERS
-   ═══════════════════════════════════════════════════════════════ */
+// ---------------------------------------------------------------------------
+// Shell Title Resolver
+// ---------------------------------------------------------------------------
 
-function resolveShellTitle(pathname: string): { title: string; subtitle: string } {
-  if (pathname.startsWith('/groups/') && pathname.endsWith('/members')) {
-    return { title: 'Members', subtitle: 'Group management' };
-  }
-  if (pathname.startsWith('/groups/') && pathname.endsWith('/chat')) {
-    return { title: 'Group Chat', subtitle: 'Real-time messaging' };
-  }
-  if (pathname.startsWith('/groups/') && pathname.endsWith('/events/new')) {
-    return { title: 'Add Class', subtitle: 'Schedule a new session' };
-  }
-  if (pathname.startsWith('/groups/') && pathname.endsWith('/import')) {
-    return { title: 'Bulk Import', subtitle: 'Import members from file' };
-  }
-  if (pathname.startsWith('/groups/')) {
-    return { title: 'Group Details', subtitle: 'Overview and settings' };
+const ROUTE_TITLES: Record<string, { title: string; subtitle: string }> = {
+  '/home': { title: 'Dashboard', subtitle: 'Your overview' },
+  '/app': { title: 'Dashboard', subtitle: 'Your overview' },
+  '/timetable': { title: 'Timetable', subtitle: 'Weekly schedule' },
+  '/schedule': { title: 'Timetable', subtitle: 'Weekly schedule' },
+  '/groups': { title: 'Groups', subtitle: 'All your groups' },
+  '/chat': { title: 'Messages', subtitle: 'Conversations' },
+  '/notifications': { title: 'Notifications', subtitle: 'Recent activity' },
+  '/activity': { title: 'Activity', subtitle: 'Recent updates' },
+  '/settings': { title: 'Settings', subtitle: 'Preferences' },
+  '/profile': { title: 'Account', subtitle: 'Your profile' },
+  '/import': { title: 'Import', subtitle: 'Bulk operations' },
+};
+
+const GROUP_ROUTE_PATTERNS: {
+  test: (path: string) => boolean;
+  result: { title: string; subtitle: string };
+}[] = [
+  {
+    test: (p) => p.endsWith('/members'),
+    result: { title: 'Members', subtitle: 'Group management' },
+  },
+  {
+    test: (p) => p.endsWith('/chat'),
+    result: { title: 'Group Chat', subtitle: 'Real-time messaging' },
+  },
+  {
+    test: (p) => p.endsWith('/events/new'),
+    result: { title: 'Add Class', subtitle: 'Schedule a new session' },
+  },
+  {
+    test: (p) => p.endsWith('/import'),
+    result: { title: 'Bulk Import', subtitle: 'Import members from file' },
+  },
+  {
+    test: (p) => p.startsWith('/groups/'),
+    result: { title: 'Group Details', subtitle: 'Overview and settings' },
+  },
+];
+
+function resolveShellTitle(pathname: string): {
+  title: string;
+  subtitle: string;
+} {
+  // Check group-specific routes first
+  if (pathname.startsWith('/groups/') && pathname !== '/groups') {
+    for (const pattern of GROUP_ROUTE_PATTERNS) {
+      if (pattern.test(pathname)) return pattern.result;
+    }
   }
 
-  const map: Record<string, { title: string; subtitle: string }> = {
-    '/home': { title: 'Dashboard', subtitle: 'Your overview' },
-    '/app': { title: 'Dashboard', subtitle: 'Your overview' },
-    '/timetable': { title: 'Timetable', subtitle: 'Weekly schedule' },
-    '/schedule': { title: 'Timetable', subtitle: 'Weekly schedule' },
-    '/groups': { title: 'Groups', subtitle: 'All your groups' },
-    '/chat': { title: 'Messages', subtitle: 'Conversations' },
-    '/notifications': { title: 'Notifications', subtitle: 'Recent activity' },
-    '/activity': { title: 'Activity', subtitle: 'Recent updates' },
-    '/settings': { title: 'Settings', subtitle: 'Preferences' },
-    '/profile': { title: 'Account', subtitle: 'Your profile' },
-    '/import': { title: 'Import', subtitle: 'Bulk operations' },
-  };
-
-  return map[pathname] ?? { title: 'BU Scheduler', subtitle: 'Timetable workspace' };
+  return (
+    ROUTE_TITLES[pathname] ?? {
+      title: 'StudentHub',
+      subtitle: 'Timetable workspace',
+    }
+  );
 }
 
-function getInitials(name?: string): string {
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getInitials(name?: string | null): string {
   if (!name) return 'BU';
   return name
     .split(' ')
@@ -93,21 +171,70 @@ function getInitials(name?: string): string {
     .toUpperCase();
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   SIDEBAR NAV LINK
-   ═══════════════════════════════════════════════════════════════ */
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar Overlay
+// ---------------------------------------------------------------------------
+
+function SidebarOverlay({
+  visible,
+  onClose,
+}: {
+  visible: boolean;
+  onClose: () => void;
+}) {
+  // Prevent body scroll when overlay is visible
+  useEffect(() => {
+    if (visible) {
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = '';
+      };
+    }
+  }, [visible]);
+
+  if (!visible) return null;
+
+  return (
+    <div
+      onClick={onClose}
+      onKeyDown={(e: ReactKeyboardEvent) => {
+        if (e.key === 'Escape') onClose();
+      }}
+      role="button"
+      tabIndex={-1}
+      aria-label="Close navigation"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 29,
+        background: 'rgba(28, 26, 23, 0.55)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
+        animation: 'fade-in 0.2s var(--ease) both',
+        cursor: 'pointer',
+      }}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar Nav Link
+// ---------------------------------------------------------------------------
 
 function SidebarNavLink({
   to,
   label,
   icon: Icon,
+  badge,
   onClick,
-}: {
-  to: string;
-  label: string;
-  icon: LucideIcon;
-  onClick?: () => void;
-}) {
+}: NavItem & { onClick?: () => void }) {
   return (
     <NavLink
       to={to}
@@ -115,28 +242,39 @@ function SidebarNavLink({
       className={({ isActive }) =>
         isActive ? 'nav-link nav-link--active' : 'nav-link'
       }
+      aria-label={badge ? `${label}, ${badge} new` : label}
     >
-      <Icon size={18} strokeWidth={2} />
+      <Icon size={18} strokeWidth={2} aria-hidden="true" />
       <span>{label}</span>
+      {badge !== undefined && badge > 0 && (
+        <span
+          className="badge badge--danger"
+          style={{
+            marginLeft: 'auto',
+            fontSize: '0.66rem',
+            padding: '1px 6px',
+            minWidth: 18,
+            textAlign: 'center',
+          }}
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </NavLink>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   MOBILE BOTTOM TAB
-   ═══════════════════════════════════════════════════════════════ */
+// ---------------------------------------------------------------------------
+// Mobile Bottom Tab
+// ---------------------------------------------------------------------------
 
 function MobileTab({
   to,
   label,
   icon: Icon,
   isAction,
-}: {
-  to: string;
-  label: string;
-  icon: LucideIcon;
-  isAction?: boolean;
-}) {
+  badge,
+}: MobileTabItem & { badge?: number }) {
   return (
     <NavLink
       to={to}
@@ -146,46 +284,513 @@ function MobileTab({
           ? 'bottom-nav__item bottom-nav__item--active'
           : 'bottom-nav__item';
       }}
+      aria-label={
+        badge && badge > 0 ? `${label}, ${badge} notifications` : label
+      }
     >
-      <Icon size={isAction ? 22 : 20} strokeWidth={isAction ? 2.4 : 2} />
+      <span style={{ position: 'relative', display: 'inline-flex' }}>
+        <Icon
+          size={isAction ? 22 : 20}
+          strokeWidth={isAction ? 2.4 : 2}
+          aria-hidden="true"
+        />
+        {badge !== undefined && badge > 0 && !isAction && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: -3,
+              right: -6,
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: 'var(--danger)',
+              border: '2px solid var(--bg)',
+              animation: 'pulse-dot 2.5s ease-in-out infinite',
+            }}
+          />
+        )}
+      </span>
       <span>{label}</span>
     </NavLink>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   SIDEBAR OVERLAY (mobile)
-   ═══════════════════════════════════════════════════════════════ */
+// ---------------------------------------------------------------------------
+// Sidebar Group Card
+// ---------------------------------------------------------------------------
 
-function SidebarOverlay({ visible, onClick }: { visible: boolean; onClick: () => void }) {
-  if (!visible) return null;
+function SidebarGroupCard({
+  group,
+  onClose,
+}: {
+  group: GroupData;
+  onClose: () => void;
+}) {
+  const groupLinks = useMemo(
+    () => [
+      {
+        to: `/groups/${group.id}`,
+        label: 'Overview',
+        icon: Sparkles,
+      },
+      {
+        to: `/groups/${group.id}/members`,
+        label: 'Members',
+        icon: Users,
+      },
+      {
+        to: `/groups/${group.id}/chat`,
+        label: 'Chat',
+        icon: MessageCircle,
+      },
+    ],
+    [group.id]
+  );
 
   return (
-    <div
-      className="sidebar-overlay"
-      onClick={onClick}
-      aria-hidden="true"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 29,
-        background: 'rgba(2, 6, 23, 0.6)',
-        backdropFilter: 'blur(4px)',
-        WebkitBackdropFilter: 'blur(4px)',
-        animation: 'fade-in 0.2s ease both',
-      }}
-    />
+    <div className="sidebar__group-card">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <div
+          className="group-card__icon"
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 'var(--radius)',
+          }}
+          aria-hidden="true"
+        >
+          <Grid2x2 size={16} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <strong
+            style={{
+              fontSize: '0.88rem',
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {group.title}
+          </strong>
+          <p
+            style={{
+              fontSize: '0.76rem',
+              marginTop: 2,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {group.courseCode} · {group.memberCount}{' '}
+            {group.memberCount === 1 ? 'member' : 'members'}
+          </p>
+        </div>
+      </div>
+
+      <div className="sidebar__group-links">
+        {groupLinks.map((link) => (
+          <Link key={link.to} to={link.to} onClick={onClose}>
+            <link.icon size={12} aria-hidden="true" />
+            {link.label}
+          </Link>
+        ))}
+      </div>
+    </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   APP SHELL
-   ═══════════════════════════════════════════════════════════════ */
+// ---------------------------------------------------------------------------
+// Sidebar Recent Groups
+// ---------------------------------------------------------------------------
+
+function SidebarRecentGroups({
+  groups,
+  onClose,
+}: {
+  groups: GroupData[];
+  onClose: () => void;
+}) {
+  if (groups.length === 0) {
+    return (
+      <p
+        className="muted"
+        style={{
+          fontSize: '0.8rem',
+          padding: '8px 12px',
+        }}
+      >
+        Join a group to see it here.
+      </p>
+    );
+  }
+
+  return (
+    <div className="sidebar__recent-groups" style={{ display: 'grid', gap: 4 }}>
+      {groups.slice(0, 4).map((group) => (
+        <NavLink
+          key={group.id}
+          to={`/groups/${group.id}`}
+          className={({ isActive }) =>
+            isActive ? 'chip chip--active' : 'chip'
+          }
+          onClick={onClose}
+          aria-label={`${group.title} — ${group.courseCode}, ${group.memberCount} members`}
+        >
+          <Grid2x2 size={14} aria-hidden="true" />
+          <span>{group.courseCode}</span>
+          <span
+            className="muted"
+            style={{ fontSize: '0.72rem', marginLeft: 'auto' }}
+            aria-hidden="true"
+          >
+            {group.memberCount}
+          </span>
+        </NavLink>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// User Profile Footer
+// ---------------------------------------------------------------------------
+
+function SidebarProfile({
+  name,
+  email,
+  initials,
+}: {
+  name: string;
+  email: string;
+  initials: string;
+}) {
+  return (
+    <div className="sidebar__footer">
+      <div className="profile-mini">
+        <div className="avatar avatar--small" aria-hidden="true">
+          {initials}
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <strong
+            style={{
+              display: 'block',
+              fontSize: '0.86rem',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {name}
+          </strong>
+          <p
+            style={{
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {email}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Account Dropdown
+// ---------------------------------------------------------------------------
+
+function AccountDropdown({
+  name,
+  email,
+  initials,
+  onSignOut,
+}: {
+  name: string;
+  email: string;
+  initials: string;
+  onSignOut: () => void;
+}) {
+  const menuRef = useRef<HTMLDetailsElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        menuRef.current.removeAttribute('open');
+      }
+    };
+    document.addEventListener('click', handler, true);
+    return () => document.removeEventListener('click', handler, true);
+  }, []);
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape' && menuRef.current?.open) {
+        menuRef.current.removeAttribute('open');
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
+  const menuItems = useMemo(
+    () => [
+      { to: '/profile', label: 'Account', icon: UserCircle },
+      { to: '/settings', label: 'Settings', icon: Settings2 },
+      { to: '/notifications', label: 'Notifications', icon: Bell },
+    ],
+    []
+  );
+
+  return (
+    <details ref={menuRef} className="topbar__menu">
+      <summary
+        className="icon-button"
+        aria-label="Account menu"
+        aria-haspopup="true"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          width: 'auto',
+          padding: '0 10px',
+        }}
+      >
+        <div
+          className="avatar avatar--tiny"
+          style={{
+            border: 'none',
+            background: 'var(--sienna-light)',
+            color: 'var(--sienna)',
+          }}
+          aria-hidden="true"
+        >
+          {initials}
+        </div>
+        <ChevronDown size={14} aria-hidden="true" />
+      </summary>
+
+      <div className="topbar__menu-panel" role="menu" aria-label="Account menu">
+        {/* User info header */}
+        <div
+          style={{
+            padding: '14px 14px 10px',
+            borderBottom: '1px solid var(--line)',
+            marginBottom: 4,
+          }}
+        >
+          <strong style={{ fontSize: '0.88rem', display: 'block' }}>
+            {name}
+          </strong>
+          <span
+            className="muted"
+            style={{ fontSize: '0.78rem', display: 'block', marginTop: 2 }}
+          >
+            {email}
+          </span>
+        </div>
+
+        {/* Nav links */}
+        {menuItems.map((item) => (
+          <Link key={item.to} to={item.to} role="menuitem">
+            <item.icon size={16} aria-hidden="true" />
+            <span>{item.label}</span>
+          </Link>
+        ))}
+
+        {/* Divider + sign out */}
+        <div
+          style={{
+            borderTop: '1px solid var(--line)',
+            marginTop: 4,
+            paddingTop: 4,
+          }}
+        >
+          <button
+            type="button"
+            onClick={onSignOut}
+            role="menuitem"
+            style={{ color: 'var(--danger)' }}
+          >
+            <LogOut size={16} aria-hidden="true" />
+            <span>Sign out</span>
+          </button>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Notification Bell
+// ---------------------------------------------------------------------------
+
+function NotificationBell({ count }: { count: number }) {
+  const hasNotifications = count > 0;
+
+  return (
+    <Link
+      to="/notifications"
+      className="icon-button"
+      aria-label={
+        hasNotifications
+          ? `Notifications, ${count} unread`
+          : 'Notifications, none unread'
+      }
+      style={{ position: 'relative' }}
+    >
+      <Bell size={18} aria-hidden="true" />
+      {hasNotifications && (
+        <span
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: 7,
+            right: 7,
+            width: 9,
+            height: 9,
+            borderRadius: '50%',
+            background: 'var(--sage)',
+            border: '2px solid var(--surface)',
+            animation: 'pulse-dot 2.5s ease-in-out infinite',
+          }}
+        />
+      )}
+    </Link>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Search Bar
+// ---------------------------------------------------------------------------
+
+function TopbarSearch() {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Cmd/Ctrl + K shortcut
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
+  return (
+    <div className="topbar__search">
+      <Search size={16} aria-hidden="true" />
+      <input
+        ref={inputRef}
+        type="search"
+        placeholder="Search timetable, groups, messages…"
+        aria-label="Search timetable and groups"
+      />
+      <kbd
+        aria-hidden="true"
+        style={{
+          padding: '2px 8px',
+          borderRadius: 6,
+          background: 'var(--slate-light)',
+          border: '1px solid var(--line)',
+          fontSize: '0.68rem',
+          color: 'var(--muted)',
+          fontFamily: 'inherit',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
+        }}
+      >
+        ⌘K
+      </kbd>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Focus Trap Hook
+// ---------------------------------------------------------------------------
+
+function useFocusTrap(containerRef: React.RefObject<HTMLElement | null>, active: boolean) {
+  useEffect(() => {
+    if (!active || !containerRef.current) return;
+
+    const container = containerRef.current;
+    const focusableSelector =
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      const focusable = Array.from(
+        container.querySelectorAll<HTMLElement>(focusableSelector)
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    container.addEventListener('keydown', handleKeyDown);
+
+    // Focus the first focusable element
+    const firstFocusable = container.querySelector<HTMLElement>(focusableSelector);
+    firstFocusable?.focus();
+
+    return () => container.removeEventListener('keydown', handleKeyDown);
+  }, [containerRef, active]);
+}
+
+// ---------------------------------------------------------------------------
+// Escape Key Hook
+// ---------------------------------------------------------------------------
+
+function useEscapeKey(callback: () => void, active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') callback();
+    };
+
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [callback, active]);
+}
+
+// ---------------------------------------------------------------------------
+// Main AppShell Component
+// ---------------------------------------------------------------------------
 
 export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // --- Store ---
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const closeSidebar = useAppStore((s) => s.closeSidebar);
@@ -195,47 +800,65 @@ export function AppShell() {
   const signOut = useAuthStore((s) => s.signOut);
   const userId = session?.user.uid;
 
+  // --- Refs ---
+  const sidebarRef = useRef<HTMLElement>(null);
+
+  // --- Data ---
   const groupsQuery = useQuery({
     queryKey: ['sidebar-groups', userId],
     queryFn: async () => (userId ? fetchUserGroups(userId) : []),
     enabled: Boolean(userId),
     staleTime: 60_000,
+    retry: 1,
   });
 
-  const sidebarRef = useRef<HTMLElement>(null);
-  const menuRef = useRef<HTMLDetailsElement>(null);
+  const sidebarGroups: GroupData[] = useMemo(
+    () => groupsQuery.data ?? [],
+    [groupsQuery.data]
+  );
 
-  const sidebarGroups = groupsQuery.data ?? [];
-  const currentGroup =
-    sidebarGroups.find((g) => g.id === selectedGroupId) ?? sidebarGroups[0] ?? null;
+  const currentGroup = useMemo(
+    () =>
+      sidebarGroups.find((g) => g.id === selectedGroupId) ??
+      sidebarGroups[0] ??
+      null,
+    [sidebarGroups, selectedGroupId]
+  );
 
+  // Notification count — in a real app this would come from a query
+  const notificationCount = 3;
+
+  // --- Derived ---
+  const { title: shellTitle, subtitle: shellSubtitle } = useMemo(
+    () => resolveShellTitle(location.pathname),
+    [location.pathname]
+  );
+
+  const userName = session?.user.displayName ?? 'Student';
+  const userEmail = session?.user.email ?? 'student@bu.edu';
+  const initials = useMemo(() => getInitials(session?.user.displayName), [session?.user.displayName]);
+
+  // --- Effects ---
+
+  // Auto-select first group if none selected
   useEffect(() => {
     if (!selectedGroupId && sidebarGroups[0]) {
       useAppStore.getState().setSelectedGroupId(sidebarGroups[0].id);
     }
   }, [selectedGroupId, sidebarGroups]);
 
-  const { title: shellTitle, subtitle: shellSubtitle } = resolveShellTitle(
-    location.pathname,
-  );
-
-  const initials = getInitials(session?.user.displayName);
-
   // Close sidebar on route change (mobile)
   useEffect(() => {
     closeSidebar();
   }, [location.pathname, closeSidebar]);
 
-  // Close dropdown menu on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        menuRef.current.removeAttribute('open');
-      }
-    };
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, []);
+  // Focus trap for sidebar when open
+  useFocusTrap(sidebarRef, sidebarOpen);
+
+  // Escape to close sidebar
+  useEscapeKey(closeSidebar, sidebarOpen);
+
+  // --- Handlers ---
 
   const handleSignOut = useCallback(() => {
     signOut();
@@ -243,141 +866,178 @@ export function AppShell() {
     navigate('/login', { replace: true });
   }, [signOut, closeSidebar, navigate]);
 
+  const handleSidebarClose = useCallback(() => {
+    closeSidebar();
+  }, [closeSidebar]);
+
+  // --- New event link ---
+  const newEventLink = currentGroup
+    ? `/groups/${currentGroup.id}/events/new`
+    : '/groups';
+
   return (
     <div className="app-shell">
-      {/* ─── Sidebar overlay (mobile) ─── */}
-      <SidebarOverlay visible={sidebarOpen} onClick={closeSidebar} />
+      {/* ═══════════════════════════════════════════════════════
+          SIDEBAR OVERLAY (mobile)
+          ═══════════════════════════════════════════════════════ */}
+      <SidebarOverlay visible={sidebarOpen} onClose={handleSidebarClose} />
 
-      {/* ─── Sidebar ─── */}
+      {/* ═══════════════════════════════════════════════════════
+          SIDEBAR
+          ═══════════════════════════════════════════════════════ */}
       <aside
         ref={sidebarRef}
         className={sidebarOpen ? 'sidebar sidebar--open' : 'sidebar'}
         aria-label="Main navigation"
+        aria-hidden={!sidebarOpen ? undefined : undefined}
       >
-        {/* Brand */}
+        {/* ── Brand ── */}
         <div className="sidebar__brand">
-          <Link to="/home" className="brand-link" onClick={closeSidebar}>
-            <span className="brand-link__mark">B</span>
+          <Link
+            to="/home"
+            className="brand-link"
+            onClick={handleSidebarClose}
+            aria-label="StudentHub — Go to dashboard"
+          >
+            <span className="brand-link__mark" aria-hidden="true">
+              S
+            </span>
             <span>
-              <strong>BU Scheduler</strong>
+              <strong>StudentHub</strong>
               <small>Timetable workspace</small>
             </span>
           </Link>
 
-          {/* Mobile close button inside sidebar */}
           <button
             type="button"
             className="icon-button mobile-only"
             aria-label="Close navigation"
-            onClick={closeSidebar}
+            onClick={handleSidebarClose}
             style={{ marginLeft: 'auto' }}
           >
-            <X size={18} />
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
 
-        {/* Primary nav */}
-        <nav className="sidebar__nav" aria-label="Primary">
-          <p className="sidebar__label">Navigation</p>
-          {navItems.map((item) => (
-            <SidebarNavLink
-              key={item.to}
-              to={item.to}
-              label={item.label}
-              icon={item.icon}
-              onClick={closeSidebar}
-            />
-          ))}
-        </nav>
-
-        {/* Current group context */}
-        <div className="sidebar__section">
-          <p className="sidebar__label">Current group</p>
-          <div className="sidebar__group-card">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div className="group-card__icon" style={{ width: 38, height: 38, borderRadius: 12 }}>
-                <Grid2x2 size={16} />
+        {/* ── Primary Nav ── */}
+        <nav className="sidebar__nav" aria-label="Primary navigation">
+          <p className="sidebar__label" id="nav-primary-label">
+            Navigation
+          </p>
+          <div role="list" aria-labelledby="nav-primary-label">
+            {primaryNavItems.map((item) => (
+              <div role="listitem" key={item.to}>
+                <SidebarNavLink
+                  {...item}
+                  badge={item.to === '/notifications' ? notificationCount : undefined}
+                  onClick={handleSidebarClose}
+                />
               </div>
-              <div>
-                <strong style={{ fontSize: '0.9rem' }}>{currentGroup.title}</strong>
-                <p style={{ fontSize: '0.78rem', marginTop: 2 }}>
-                  {currentGroup.courseCode} · {currentGroup.memberCount} members
-                </p>
-              </div>
-            </div>
-
-            <div className="sidebar__group-links">
-              <Link to={currentGroup ? `/groups/${currentGroup.id}` : '/groups'} onClick={closeSidebar}>
-                <Sparkles size={12} /> Overview
-              </Link>
-              <Link to={currentGroup ? `/groups/${currentGroup.id}/members` : '/groups'} onClick={closeSidebar}>
-                <Users size={12} /> Members
-              </Link>
-              <Link to={currentGroup ? `/groups/${currentGroup.id}/chat` : '/groups'} onClick={closeSidebar}>
-                <MessageCircle size={12} /> Chat
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent groups */}
-        <div className="sidebar__section">
-          <p className="sidebar__label">Recent groups</p>
-          <div className="sidebar__recent-groups" style={{ display: 'grid', gap: 4 }}>
-            {sidebarGroups.slice(0, 3).map((group) => (
-              <NavLink
-                key={group.id}
-                to={`/groups/${group.id}`}
-                className={({ isActive }) =>
-                  isActive ? 'chip chip--active' : 'chip'
-                }
-                onClick={closeSidebar}
-              >
-                <Grid2x2 size={14} />
-                <span>{group.courseCode}</span>
-                <span
-                  className="muted"
-                  style={{ fontSize: '0.72rem', marginLeft: 'auto' }}
-                >
-                  {group.memberCount}
-                </span>
-              </NavLink>
             ))}
           </div>
+
+          <p
+            className="sidebar__label"
+            id="nav-secondary-label"
+            style={{ marginTop: 8 }}
+          >
+            System
+          </p>
+          <div role="list" aria-labelledby="nav-secondary-label">
+            {secondaryNavItems.map((item) => (
+              <div role="listitem" key={item.to}>
+                <SidebarNavLink
+                  {...item}
+                  badge={
+                    item.to === '/notifications' ? notificationCount : undefined
+                  }
+                  onClick={handleSidebarClose}
+                />
+              </div>
+            ))}
+          </div>
+        </nav>
+
+        {/* ── Current Group Context ── */}
+        {currentGroup && (
+          <div className="sidebar__section">
+            <p className="sidebar__label">Current group</p>
+            <SidebarGroupCard
+              group={currentGroup}
+              onClose={handleSidebarClose}
+            />
+          </div>
+        )}
+
+        {/* ── Recent Groups ── */}
+        <div className="sidebar__section">
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <p className="sidebar__label" style={{ margin: 0 }}>
+              Recent groups
+            </p>
+            {sidebarGroups.length > 4 && (
+              <Link
+                to="/groups"
+                onClick={handleSidebarClose}
+                className="inline-link"
+                style={{ fontSize: '0.72rem' }}
+              >
+                All
+                <ChevronRight size={12} aria-hidden="true" />
+              </Link>
+            )}
+          </div>
+          <SidebarRecentGroups
+            groups={sidebarGroups}
+            onClose={handleSidebarClose}
+          />
         </div>
 
-        {/* Footer / profile */}
-        <div className="sidebar__footer">
-          <div className="profile-mini">
-            <div className="avatar avatar--small">{initials}</div>
-            <div style={{ minWidth: 0 }}>
-              <strong style={{ display: 'block', fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {session?.user.displayName ?? 'Student'}
-              </strong>
-              <p style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {session?.user.email ?? 'student@bu.edu'}
-              </p>
-            </div>
-          </div>
-        </div>
+        {/* ── Profile Footer ── */}
+        <SidebarProfile name={userName} email={userEmail} initials={initials} />
       </aside>
 
-      {/* ─── Main content area ─── */}
+      {/* ═══════════════════════════════════════════════════════
+          MAIN CONTENT AREA
+          ═══════════════════════════════════════════════════════ */}
       <div className="app-shell__content">
-        {/* Top bar */}
-        <header className="topbar">
+        {/* ── Top Bar ── */}
+        <header className="topbar" role="banner">
           <div className="topbar__left">
+            {/* Mobile menu toggle */}
             <button
               type="button"
               className="icon-button mobile-only"
-              aria-label="Open navigation"
+              aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'}
+              aria-expanded={sidebarOpen}
+              aria-controls="sidebar"
               onClick={toggleSidebar}
             >
-              <Menu size={18} />
+              {sidebarOpen ? (
+                <X size={18} aria-hidden="true" />
+              ) : (
+                <Menu size={18} aria-hidden="true" />
+              )}
             </button>
 
-            <Link to="/home" className="topbar__brand">
-              <span className="brand-link__mark brand-link__mark--small">B</span>
+            {/* Brand + Title */}
+            <Link
+              to="/home"
+              className="topbar__brand"
+              aria-label="StudentHub — Go to dashboard"
+            >
+              <span
+                className="brand-link__mark brand-link__mark--small"
+                aria-hidden="true"
+              >
+                S
+              </span>
               <span className="topbar__title-group">
                 <strong>{shellTitle}</strong>
                 <small>{shellSubtitle}</small>
@@ -386,142 +1046,48 @@ export function AppShell() {
           </div>
 
           {/* Search */}
-          <div className="topbar__search">
-            <Search size={16} />
-            <input
-              type="search"
-              placeholder="Search timetable, groups, messages…"
-              aria-label="Search timetable and groups"
-            />
-            <kbd
-              style={{
-                padding: '2px 8px',
-                borderRadius: 6,
-                background: 'rgba(148,163,184,0.1)',
-                border: '1px solid rgba(148,163,184,0.15)',
-                fontSize: '0.68rem',
-                color: '#64748b',
-                fontFamily: 'inherit',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              ⌘K
-            </kbd>
-          </div>
+          <TopbarSearch />
 
           {/* Right actions */}
           <div className="topbar__meta">
-            {/* Quick add */}
+            {/* Quick add button */}
             <Link
-              to={currentGroup ? `/groups/${currentGroup.id}/events/new` : '/groups'}
+              to={newEventLink}
               className="button button--primary button--sm topbar__action"
               style={{ gap: 8 }}
+              aria-label="Add new class"
             >
-              <PlusCircle size={16} />
+              <PlusCircle size={16} aria-hidden="true" />
               <span>Add class</span>
             </Link>
 
             {/* Notifications */}
-            <Link
-              to="/notifications"
-              className="icon-button"
-              aria-label="Notifications"
-              style={{ position: 'relative' }}
-            >
-              <Bell size={18} />
-              {/* Notification dot */}
-              <span
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  top: 8,
-                  right: 8,
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: '#16a34a',
-                  border: '2px solid var(--bg)',
-                  animation: 'pulse-dot 2.5s ease-in-out infinite',
-                }}
-              />
-            </Link>
+            <NotificationBell count={notificationCount} />
 
             {/* Account dropdown */}
-            <details ref={menuRef} className="topbar__menu">
-              <summary
-                className="icon-button"
-                aria-label="Account menu"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  width: 'auto',
-                  padding: '0 10px',
-                }}
-              >
-                <div
-                  className="avatar avatar--tiny"
-                  style={{ border: 'none', background: 'rgba(22,163,74,0.15)', color: '#86efac' }}
-                >
-                  {initials}
-                </div>
-                <ChevronDown size={14} />
-              </summary>
-
-              <div className="topbar__menu-panel">
-                <div
-                  style={{
-                    padding: '12px 12px 8px',
-                    borderBottom: '1px solid rgba(148,163,184,0.08)',
-                    marginBottom: 4,
-                  }}
-                >
-                  <strong style={{ fontSize: '0.88rem', display: 'block' }}>
-                    {session?.user.displayName ?? 'Student'}
-                  </strong>
-                  <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                    {session?.user.email ?? 'student@bu.edu'}
-                  </span>
-                </div>
-
-                <Link to="/profile">
-                  <UserCircle size={16} />
-                  <span>Account</span>
-                </Link>
-                <Link to="/settings">
-                  <Settings2 size={16} />
-                  <span>Settings</span>
-                </Link>
-                <Link to="/notifications">
-                  <Bell size={16} />
-                  <span>Notifications</span>
-                </Link>
-
-                <div
-                  style={{
-                    borderTop: '1px solid rgba(148,163,184,0.08)',
-                    marginTop: 4,
-                    paddingTop: 4,
-                  }}
-                >
-                  <button type="button" onClick={handleSignOut} style={{ color: '#fca5a5' }}>
-                    <LogOut size={16} />
-                    <span>Sign out</span>
-                  </button>
-                </div>
-              </div>
-            </details>
+            <AccountDropdown
+              name={userName}
+              email={userEmail}
+              initials={initials}
+              onSignOut={handleSignOut}
+            />
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="app-main">
+        {/* ── Page Content ── */}
+        <main className="app-main" id="main-content">
           <Outlet />
         </main>
       </div>
 
-      {/* ─── Bottom navigation (mobile) ─── */}
-      <nav className="bottom-nav mobile-only" aria-label="Mobile navigation">
+      {/* ═══════════════════════════════════════════════════════
+          BOTTOM NAVIGATION (mobile)
+          ═══════════════════════════════════════════════════════ */}
+      <nav
+        className="bottom-nav mobile-only"
+        aria-label="Mobile navigation"
+        role="navigation"
+      >
         {mobileTabs.map((tab) => (
           <MobileTab
             key={tab.to}
@@ -529,6 +1095,7 @@ export function AppShell() {
             label={tab.label}
             icon={tab.icon}
             isAction={tab.isAction}
+            badge={tab.to === '/notifications' ? notificationCount : undefined}
           />
         ))}
       </nav>

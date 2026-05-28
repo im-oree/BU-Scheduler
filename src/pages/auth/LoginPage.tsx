@@ -86,6 +86,7 @@ export function LoginPage() {
           <label className="auth-field">
             <span className="auth-field__label">Email</span>
             <Input
+              label="Email"
               id="email"
               name="email"
               type="email"
@@ -102,6 +103,7 @@ export function LoginPage() {
           <label className="auth-field">
             <span className="auth-field__label">Password</span>
             <Input
+              label="Password"
               id="password"
               name="password"
               type="password"

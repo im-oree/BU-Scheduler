@@ -1,35 +1,56 @@
-import { ArrowRight, Copy, Lock } from 'lucide-react';
-import { Button, Card } from '../../components/ui';
-import { invitePreview } from '../../data/mockData';
+import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowRight, Link2, LogIn, Users } from 'lucide-react';
+import { Button, Card, EmptyState } from '../../components/ui';
+import { PageFrame } from '../../components/shared';
 
 export function InvitePage() {
+  const navigate = useNavigate();
+  const { inviteCode } = useParams<{ inviteCode: string }>();
+  const code = inviteCode?.trim() || 'Unknown invite';
+
+  function handleOpenJoinFlow() {
+    navigate(`/groups?mode=join&invite=${encodeURIComponent(code)}`);
+  }
+
   return (
-    <div className="auth-layout auth-layout--centered">
-      <Card className="auth-card auth-card--login">
-        <p className="eyebrow eyebrow--subtle">Invite flow</p>
-        <h1>{invitePreview.title}</h1>
-        <p className="muted">{invitePreview.subtitle}</p>
-        <div className="invite-card__details">
-          <Lock size={18} />
-          <span>{invitePreview.note}</span>
-        </div>
-        <div className="stack stack--large">
-          <Button
-            variant="primary"
-            size="lg"
-            leadingIcon={<ArrowRight size={18} />}
-          >
-            Sign in to accept
-          </Button>
-          <Button
-            variant="secondary"
-            size="lg"
-            leadingIcon={<Copy size={18} />}
-          >
-            Copy invite code
-          </Button>
-        </div>
-      </Card>
-    </div>
+    <PageFrame
+      eyebrow="Invite"
+      title="Join your group"
+      description="Use the invite code to open the group join flow and connect with your coursemates."
+    >
+      <div className="dashboard-grid">
+        <Card>
+          <EmptyState
+            icon={<Users size={24} />}
+            title={code}
+            description="This invite can be used to join a course group in StudentHub. If you are not signed in yet, log in first and come back to continue."
+            action={
+              <div className="toolbar-actions">
+                <Button variant="primary" leadingIcon={<Link2 size={18} />} onClick={handleOpenJoinFlow}>
+                  Open join flow
+                </Button>
+                <Button variant="secondary" leadingIcon={<LogIn size={18} />} onClick={() => navigate('/login')}>
+                  Sign in
+                </Button>
+              </div>
+            }
+          />
+        </Card>
+
+        <Card>
+          <p className="eyebrow eyebrow--subtle">Next step</p>
+          <h2>What happens next</h2>
+          <p className="muted" style={{ marginTop: 8 }}>
+            The join modal will accept the invite code or a pasted invite link.
+            After that, the app will route you into the matching group page.
+          </p>
+          <div style={{ marginTop: 16 }}>
+            <Button variant="ghost" leadingIcon={<ArrowRight size={18} />} onClick={handleOpenJoinFlow}>
+              Continue
+            </Button>
+          </div>
+        </Card>
+      </div>
+    </PageFrame>
   );
 }

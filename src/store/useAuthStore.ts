@@ -28,7 +28,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   session: null,
   error: null,
   async bootstrap() {
-    const auth = getFirebaseAuth();
+    let auth;
+    try {
+      auth = getFirebaseAuth();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // If Firebase failed to initialize (missing env/config), fall back to
+      // anonymous state so the app doesn't stay stuck in `loading`.
+      // eslint-disable-next-line no-console
+      console.error('[useAuthStore] bootstrap - firebase init failed:', message);
+      set({ status: 'anonymous', session: null, error: message });
+      return;
+    }
 
     onFirebaseAuthStateChanged(auth, async (user) => {
       if (!user) {

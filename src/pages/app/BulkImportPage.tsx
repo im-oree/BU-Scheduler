@@ -4,10 +4,30 @@ import { Button, Card } from '../../components/ui';
 import { PageFrame } from '../../components/shared';
 import { formatDateLabel } from '../../lib/format';
 import { useAuthStore } from '../../store/useAuthStore';
-import { fetchUserTimetableEntries } from '../../lib/studenthubData';
+import { fetchUserTimetableEntries, fetchGroupMembers, fetchCurrentUserProfile } from '../../lib/studenthubData';
+import { useParams } from 'react-router-dom';
 
 export function BulkImportPage() {
   const userId = useAuthStore((state) => state.session?.user.uid);
+  const { groupId } = useParams();
+
+  const membersQuery = useQuery({
+    queryKey: ['group-members', groupId],
+    queryFn: async () => (groupId ? fetchGroupMembers(groupId) : []),
+    enabled: Boolean(groupId),
+    staleTime: 60_000,
+  });
+
+  const profileQuery = useQuery({
+    queryKey: ['profile', userId],
+    queryFn: async () => (userId ? fetchCurrentUserProfile(userId) : null),
+    enabled: Boolean(userId),
+  });
+
+  const isGroupRep = (membersQuery.data ?? []).some((m) => m.id === userId && m.role === 'Group Rep');
+  const isCourseRep = (membersQuery.data ?? []).some((m) => m.id === userId && m.role === 'Course Rep') || ((profileQuery.data?.courseReps ?? []).length > 0);
+  const isCourseAdmin = (profileQuery.data?.courseAdmins ?? []).length > 0;
+  const canImport = groupId ? (isCourseAdmin || isCourseRep || isGroupRep) : isCourseAdmin;
   const timetableQuery = useQuery({
     queryKey: ['timetable', userId],
     queryFn: async () => (userId ? fetchUserTimetableEntries(userId) : []),
@@ -23,9 +43,15 @@ export function BulkImportPage() {
       title="Upload, preview, and confirm"
       description="CSV and ICS imports are split into a validation step and a confirmation step so errors are visible before the job starts."
       action={
-        <Button variant="primary" leadingIcon={<Upload size={18} />}>
-          Upload file
-        </Button>
+        canImport ? (
+          <Button variant="primary" leadingIcon={<Upload size={18} />}>
+            Upload file
+          </Button>
+        ) : (
+          <Button variant="ghost" disabled>
+            Upload (insufficient permissions)
+          </Button>
+        )
       }
     >
       <div className="section-block section-block--split">
@@ -48,9 +74,9 @@ export function BulkImportPage() {
           <div className="preview-table">
             {scheduleEvents.map((event) => (
               <div key={event.id} className="preview-table__row">
-                <strong>{event.title}</strong>
-                <span>{formatDateLabel(event.startAt)}</span>
-                <span>{event.location}</span>
+                <strong>{event.courseName}</strong>
+                <span>{formatDateLabel(event.startTime)}</span>
+                <span>{event.venue}</span>
               </div>
             ))}
           </div>
@@ -58,12 +84,13 @@ export function BulkImportPage() {
             <Button
               variant="ghost"
               leadingIcon={<Download size={18} />}
+              disabled={!canImport}
             >
               Download errors
             </Button>
             <div className="form-actions__right">
               <Button variant="ghost">Back</Button>
-              <Button variant="primary">Confirm import</Button>
+              <Button variant="primary" disabled={!canImport}>Confirm import</Button>
             </div>
           </div>
         </Card>

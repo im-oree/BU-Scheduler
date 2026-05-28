@@ -24,6 +24,17 @@ export function initFirebase() {
     measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
   };
 
+  // Basic validation to avoid silent runtime failures when env vars are
+  // missing or misconfigured in the Vite environment. This helps developers
+  // quickly surface configuration issues instead of getting empty query
+  // results with no obvious error.
+  if (!options.projectId || !options.apiKey) {
+    const msg = `Missing Firebase configuration: projectId=${String(options.projectId)}, apiKey=${String(options.apiKey)}`;
+    // eslint-disable-next-line no-console
+    console.error('[firebase] initFirebase - invalid config:', msg);
+    throw new Error(msg);
+  }
+
   app = initializeApp(options);
   return app;
 }

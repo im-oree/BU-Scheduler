@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {
   Button,
   Card,
+  Badge,
   Input,
   Select,
   Tabs,
@@ -63,6 +64,62 @@ export function ProfilePage() {
               defaultValue={profile?.bio ?? ''}
               rows={4}
             />
+            <div style={{ gridColumn: '1/-1' }}>
+              <h3 style={{ margin: '8px 0' }}>Roles & Permissions</h3>
+              {profile ? (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {profile.courseAdmins?.length > 0 && (
+                      <Badge tone="danger">Course Admin</Badge>
+                    )}
+                    {profile.courseReps?.length > 0 && (
+                      <Badge tone="info">Course Rep</Badge>
+                    )}
+                    {profile.levelCourseReps?.length > 0 && (
+                      <Badge tone="warning">Level Course Rep</Badge>
+                    )}
+                    {profile.groupReps?.length > 0 && (
+                      <Badge tone="success">Group Rep</Badge>
+                    )}
+                    {!(profile.courseAdmins?.length || profile.courseReps?.length || profile.levelCourseReps?.length || profile.groupReps?.length) && (
+                      <span className="muted">No special roles</span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {profile.courseAdmins?.length > 0 && (
+                      <div>
+                        <strong>Course Admin — Can:</strong>
+                        <div className="muted">Manage all groups, edit course settings, and perform admin actions.</div>
+                      </div>
+                    )}
+
+                    {profile.courseReps?.length > 0 && (
+                      <div>
+                        <strong>Course Rep — Can:</strong>
+                        <div className="muted">Create and manage groups for the course; cannot manage other courses.</div>
+                      </div>
+                    )}
+
+                    {profile.levelCourseReps?.length > 0 && (
+                      <div>
+                        <strong>Level Course Rep — Can:</strong>
+                        <div className="muted">Create groups limited to their level; cannot modify other levels.</div>
+                      </div>
+                    )}
+
+                    {profile.groupReps?.length > 0 && (
+                      <div>
+                        <strong>Group Rep — Can:</strong>
+                        <div className="muted">Invite and manage members within their groups; cannot create global groups.</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="muted">Loading roles…</div>
+              )}
+            </div>
           </div>
         )}
         {tab === 'notifications' && (
