@@ -8,6 +8,12 @@ import { initFirebase, signInWithEmail } from '../../lib/firebase';
 import { useAuthStore } from '../../store/useAuthStore';
 import { BearMascot, type BearMood } from '../../components/BearMascot';
 import { bearSounds } from '../../lib/bearSounds';
+import {
+  EmailProviderModal,
+  EmailProviderBadge,
+  SplitEmailInput,
+} from '../../components/EmailProviderPicker';
+import { DEFAULT_PROVIDER } from '../../lib/emailProviders';
 
 const STUDENTHUB_SIGNUP_URL = 'https://studenthub-app.vercel.app/signup';
 
@@ -19,16 +25,16 @@ export function LoginPage() {
   const authSession = useAuthStore((s) => s.session);
   const authError = useAuthStore((s) => s.error);
 
-  const [email, setEmail] = useState('');
+  const [emailUsername, setEmailUsername] = useState('');
+  const [activeProvider, setActiveProvider] = useState<string>(DEFAULT_PROVIDER);
+  const [showProviderModal, setShowProviderModal] = useState(false);
+
   const [password, setPassword] = useState('');
   const [loadingSignIn, setLoadingSignIn] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [showSignupBanner, setShowSignupBanner] = useState(false);
 
-  // 🐻 Bear mascot state
-  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(
-    null,
-  );
+  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(null);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [soundsMuted, setSoundsMuted] = useState(bearSounds.isMuted());
@@ -43,7 +49,8 @@ export function LoginPage() {
   const isBusy = loadingSignIn;
   const displayedError = formError ?? authError ?? null;
 
-  // ── Derive bear mood ──
+  const fullEmail = emailUsername ? `${emailUsername}${activeProvider}` : '';
+
   const bearMood: BearMood = (() => {
     if (loginSuccess || authStatus === 'authenticated') return 'happy';
     if (displayedError) return 'sad';
@@ -54,7 +61,6 @@ export function LoginPage() {
     return 'idle';
   })();
 
-  // Play sounds on mood changes
   const prevMoodRef = useRef<BearMood>('idle');
   useEffect(() => {
     const prev = prevMoodRef.current;
@@ -68,7 +74,6 @@ export function LoginPage() {
     prevMoodRef.current = bearMood;
   }, [bearMood]);
 
-  // Redirect on success
   useEffect(() => {
     if (authStatus === 'authenticated') {
       setLoginSuccess(true);
@@ -79,7 +84,6 @@ export function LoginPage() {
     }
   }, [authStatus, navigate, returnTo]);
 
-  // Cleanup popup poll
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -121,9 +125,9 @@ export function LoginPage() {
     e.preventDefault();
     setFormError(null);
 
-    const trimmedEmail = email.trim();
+    const trimmedEmail = fullEmail.trim();
 
-    if (!trimmedEmail || !password) {
+    if (!emailUsername.trim() || !password) {
       setFormError('Please enter both your email and password.');
       return;
     }
@@ -134,9 +138,7 @@ export function LoginPage() {
       initFirebase();
       await signInWithEmail(trimmedEmail, password);
     } catch (error) {
-      setFormError(
-        error instanceof Error ? error.message : 'Sign in failed.',
-      );
+      setFormError(error instanceof Error ? error.message : 'Sign in failed.');
     } finally {
       setLoadingSignIn(false);
     }
@@ -158,10 +160,9 @@ export function LoginPage() {
         <div style={{ position: 'relative' }}>
           <BearMascot
             mood={bearMood}
-            emailProgress={Math.min(email.length / 20, 1)}
+            emailProgress={Math.min(emailUsername.length / 20, 1)}
           />
 
-          {/* Mute toggle */}
           <button
             type="button"
             onClick={toggleMute}
@@ -190,7 +191,7 @@ export function LoginPage() {
         {/* ── Brand header ──────────────────────────── */}
         <div className="auth-card__brand">
           <div>
-            <h1>Hello There!</h1>
+            <h1>Welcome back</h1>
           </div>
         </div>
 
@@ -198,17 +199,14 @@ export function LoginPage() {
           Sign in with your StudentHub account.
         </p>
 
-        {/* ── Signup complete banner ────────────────── */}
+        {/* ── Signup banner ────────────────────────── */}
         <AnimatePresence>
           {showSignupBanner && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              style={{
-                overflow: 'hidden',
-                marginBottom: 16,
-              }}
+              style={{ overflow: 'hidden', marginBottom: 16 }}
             >
               <div
                 style={{
@@ -239,7 +237,6 @@ export function LoginPage() {
                 >
                   ✓
                 </span>
-
                 <div style={{ flex: 1 }}>
                   <strong
                     style={{
@@ -251,18 +248,11 @@ export function LoginPage() {
                   >
                     Account created?
                   </strong>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: '#B3B6C6',
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    If you just finished signing up on StudentHub, enter your
-                    new email and password below to sign in.
+                  <span style={{ fontSize: 12, color: '#B3B6C6', lineHeight: 1.5 }}>
+                    If you just finished signing up on StudentHub, enter your new email
+                    and password below to sign in.
                   </span>
                 </div>
-
                 <button
                   onClick={() => setShowSignupBanner(false)}
                   style={{
@@ -284,30 +274,69 @@ export function LoginPage() {
         </AnimatePresence>
 
         {/* ── Sign in form ──────────────────────────── */}
-        <form onSubmit={handleEmailSignIn} className="auth-form">
-          <label className="auth-field">
-            <span className="auth-field__label"></span>
-            <Input
-              label="Email"
-              id="email"
-              name="email"
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+        <form
+          onSubmit={handleEmailSignIn}
+          className="auth-form"
+          style={{ display: 'grid', gap: 16 }}
+        >
+          {/* Provider badge - OUTSIDE any label */}
+          <EmailProviderBadge
+            activeValue={activeProvider}
+            onClick={() => setShowProviderModal(true)}
+          />
+
+          {/* Email field - using plain div, NOT auth-field */}
+          <div style={{ display: 'grid', gap: 8 }}>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                color: '#B3B6C6',
+                paddingLeft: 2,
+              }}
+            >
+              Email
+            </span>
+            <SplitEmailInput
+              username={emailUsername}
+              onUsernameChange={setEmailUsername}
+              activeValue={activeProvider}
+              onOpenProviderModal={() => setShowProviderModal(true)}
               onFocus={() => setFocusedField('email')}
               onBlur={() => setFocusedField(null)}
               disabled={isBusy}
-              required
             />
-          </label>
+            {emailUsername && (
+              <motion.span
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                style={{
+                  fontSize: 11,
+                  color: '#6B7280',
+                  paddingLeft: 4,
+                }}
+              >
+                Signing in as{' '}
+                <strong style={{ color: '#B3B6C6' }}>{fullEmail}</strong>
+              </motion.span>
+            )}
+          </div>
 
-          <label className="auth-field">
-            <span className="auth-field__label"></span>
+          {/* Password field - use Input directly without auth-field wrapper */}
+          <div style={{ display: 'grid', gap: 8 }}>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                color: '#B3B6C6',
+                paddingLeft: 2,
+              }}
+            >
+              Password
+            </span>
             <Input
               label="Password"
+              hideLabel
               id="password"
               name="password"
               type="password"
@@ -321,19 +350,19 @@ export function LoginPage() {
               disabled={isBusy}
               required
             />
-          </label>
+          </div>
 
           <Button
             type="submit"
             variant="primary"
             className="button--full-width"
             disabled={isBusy}
+            style={{ marginTop: 8 }}
           >
             {loadingSignIn ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
 
-        {/* ── Error message ─────────────────────────── */}
         <AnimatePresence>
           {displayedError && (
             <motion.div
@@ -341,7 +370,7 @@ export function LoginPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
-              <p className="form-error" role="alert">
+              <p className="form-error" role="alert" style={{ marginTop: 12 }}>
                 {displayedError}
               </p>
             </motion.div>
@@ -372,7 +401,6 @@ export function LoginPage() {
           <div style={{ flex: 1, height: 1, backgroundColor: '#23263D' }} />
         </div>
 
-        {/* ── Create account button ─────────────────── */}
         <button
           type="button"
           onClick={openSignupPopup}
@@ -418,9 +446,7 @@ export function LoginPage() {
             <line x1="20" y1="8" x2="20" y2="14" />
             <line x1="23" y1="11" x2="17" y2="11" />
           </svg>
-
           <span>Create a StudentHub Account</span>
-
           <svg
             width="13"
             height="13"
@@ -450,6 +476,13 @@ export function LoginPage() {
           Opens StudentHub signup. Come back here to sign in once done.
         </p>
       </Card>
+
+      <EmailProviderModal
+        isOpen={showProviderModal}
+        onClose={() => setShowProviderModal(false)}
+        activeValue={activeProvider}
+        onSelect={(value) => setActiveProvider(value)}
+      />
     </div>
   );
 }
